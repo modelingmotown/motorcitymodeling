@@ -1,0 +1,642 @@
+%PDF-1.4
+%“Œ‹ž ReportLab Generated PDF document (opensource)
+1 0 obj
+<<
+/F1 2 0 R /F2 3 0 R
+>>
+endobj
+2 0 obj
+<<
+/BaseFont /Helvetica /Encoding /WinAnsiEncoding /Name /F1 /Subtype /Type1 /Type /Font
+>>
+endobj
+3 0 obj
+<<
+/BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding /Name /F2 /Subtype /Type1 /Type /Font
+>>
+endobj
+4 0 obj
+<<
+/Contents 73 0 R /MediaBox [ 0 0 612 792 ] /Parent 72 0 R /Resources <<
+/Font 1 0 R /ProcSet [ /PDF /Text /ImageB /ImageC /ImageI ]
+>> /Rotate 0 /Trans <<
+
+>> 
+  /Type /Page
+>>
+endobj
+5 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://www.rdocumentation.org/packages/base/versions/3.6.2/topics/readRDS)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 685.2975 91.5355 695.7975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+6 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://www.rdocumentation.org/packages/base/versions/3.3.0/topics/list2env)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 656.2975 87.294 666.7975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+7 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://rdrr.io/r/base/ifelse.html)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 627.2975 77.3745 637.7975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+8 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://www.rdocumentation.org/packages/base/versions/3.3.0/topics/nrow)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 598.2975 75.9465 608.7975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+9 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://rdrr.io/r/base/sprintf.html)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 579.7975 82.0835 590.2975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+10 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://rdrr.io/r/base/paste.html)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 561.2975 82.568 571.7975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+11 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://www.rdocumentation.org/packages/SparkR/versions/2.1.2/topics/abs)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 542.7975 70.2855 553.2975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+12 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://www.rdocumentation.org/packages/base/versions/3.6.2/topics/unname)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 524.2975 88.229 534.7975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+13 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://www.rdocumentation.org/packages/base/versions/3.6.2/topics/summary)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 505.7975 93.431 516.2975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+14 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://rdrr.io/r/base/attr.html)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 487.2975 69.3335 497.7975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+15 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://www.rdocumentation.org/packages/base/versions/3.3.0/topics/which.min)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 468.7975 99.1005 479.2975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+16 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://www.rdocumentation.org/packages/base/versions/3.6.2/topics/integer)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 450.2975 95.794 460.7975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+17 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://www.rdocumentation.org/packages/base/versions/3.6.2/topics/numeric)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 431.7975 100.52 442.2975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+18 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://www.rdocumentation.org/packages/base/versions/3.6.2/topics/list)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 413.2975 79.7375 423.7975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+19 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://www.rdocumentation.org/packages/base/versions/3.6.2/topics/character)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 394.7975 105.722 405.2975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+20 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://stringr.tidyverse.org/articles/from-base.html?q=tolo#case-convert-case-of-a-string)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 376.2975 85.866 386.7975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+21 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://www.rdocumentation.org/packages/base/versions/3.3.0/topics/apply)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 357.7975 77.842 368.2975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+22 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://rdrr.io/r/base/trimws.html)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 339.2975 83.0355 349.7975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+23 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://rdrr.io/r/base/seq.html)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 320.7975 70.2855 331.2975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+24 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://www.rdocumentation.org/packages/base/versions/3.6.2/topics/lapply)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 302.2975 80.205 312.7975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+25 0 obj
+<<
+/Annots [ 5 0 R 6 0 R 7 0 R 8 0 R 9 0 R 10 0 R 11 0 R 12 0 R 13 0 R 14 0 R 
+  15 0 R 16 0 R 17 0 R 18 0 R 19 0 R 20 0 R 21 0 R 22 0 R 23 0 R 24 0 R ] /Contents 74 0 R /MediaBox [ 0 0 612 792 ] /Parent 72 0 R /Resources <<
+/Font 1 0 R /ProcSet [ /PDF /Text /ImageB /ImageC /ImageI ]
+>> /Rotate 0 
+  /Trans <<
+
+>> /Type /Page
+>>
+endobj
+26 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://www.rdocumentation.org/packages/stats/versions/3.5.2/topics/lm)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 685.2975 65.5595 695.7975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+27 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://rdrr.io/r/stats/cor.html)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 666.7975 68.866 677.2975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+28 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://www.rdocumentation.org/packages/stats/versions/3.5.2/topics/model.frame)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 648.2975 106.181 658.7975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+29 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://www.rdocumentation.org/packages/stats/versions/3.6.2/topics/model.matrix)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 629.7975 108.544 640.2975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+30 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://search.r-project.org/R/refmans/stats/html/model.extract.html)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 611.2975 120.8265 621.7975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+31 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://rdrr.io/r/stats/update.html)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 592.7975 83.503 603.2975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+32 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://rdrr.io/r/stats/mahalanobis.html)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 574.2975 107.6005 584.7975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+33 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://rdrr.io/r/stats/df.residual.html)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 555.7975 98.6245 566.2975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+34 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://rdrr.io/r/stats/coef.html)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 537.2975 73.116 547.7975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+35 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://rdrr.io/r/stats/sd.html)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 518.7975 65.5595 529.2975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+36 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://www.rdocumentation.org/packages/here/versions/1.0.1/topics/here)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 435.7975 73.592 446.2975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+37 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://readr.tidyverse.org/reference/read_delim.html)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 352.7975 92.496 363.2975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+38 0 obj
+<<
+/Annots [ 26 0 R 27 0 R 28 0 R 29 0 R 30 0 R 31 0 R 32 0 R 33 0 R 34 0 R 35 0 R 
+  36 0 R 37 0 R ] /Contents 75 0 R /MediaBox [ 0 0 612 792 ] /Parent 72 0 R /Resources <<
+/Font 1 0 R /ProcSet [ /PDF /Text /ImageB /ImageC /ImageI ]
+>> /Rotate 0 
+  /Trans <<
+
+>> /Type /Page
+>>
+endobj
+39 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://dplyr.tidyverse.org/articles/base.html?q=rename_with#rename_with-rename-variables-with-a-function)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 685.2975 107.6005 695.7975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+40 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://dplyr.tidyverse.org/reference/filter.html)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 666.7975 74.0595 677.2975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+41 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://dplyr.tidyverse.org/articles/grouping.html?q=mut#mutate)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 648.2975 83.503 658.7975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+42 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://dplyr.tidyverse.org/reference/arrange.html)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 629.7975 86.818 640.2975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+43 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://dplyr.tidyverse.org/articles/grouping.html?q=grou#group_by)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 611.2975 94.366 621.7975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+44 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://dplyr.tidyverse.org/reference/group_by.html)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 592.7975 90.1075 603.2975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+45 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://dplyr.tidyverse.org/articles/recoding-replacing.html?q=case#case_when)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 574.2975 100.996 584.7975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+46 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://dplyr.tidyverse.org/reference/select.html)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 555.7975 79.7375 566.2975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+47 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://dplyr.tidyverse.org/reference/setops.html)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 537.2975 81.14 547.7975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+48 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://dplyr.tidyverse.org/reference/bind_cols.html?q=bind#null)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 518.7975 95.318 529.2975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+49 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://dplyr.tidyverse.org/reference/bind_rows.html?q=bind_row#null)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 500.2975 98.1485 510.7975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+50 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://dplyr.tidyverse.org/reference/pull.html?q=pull#ref-usage)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 481.7975 70.753 492.2975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+51 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://dplyr.tidyverse.org/reference/relocate.html?q=relocate#null)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 463.2975 88.2375 473.7975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+52 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://dplyr.tidyverse.org/reference/all_vars.html)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 444.7975 87.3025 455.2975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+53 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://dplyr.tidyverse.org/articles/recoding-replacing.html?q=coale#coalesce)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 426.2975 91.5525 436.7975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+54 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://dplyr.tidyverse.org/reference/mutate-joins.html?q=full_join#methods)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 407.7975 88.229 418.2975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+55 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://dplyr.tidyverse.org/reference/transmute.html?q=transmute#ref-usage)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 389.2975 96.729 399.7975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+56 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://dplyr.tidyverse.org/reference/distinct.html?q=distinct#null)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 370.7975 85.866 381.2975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+57 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://dplyr.tidyverse.org/reference/dplyr_by.html?q=slice_head#supported-verbs)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 352.2975 99.109 362.7975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+58 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://www.rdocumentation.org/packages/lubridate/versions/1.7.4/topics/parse_date_time)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 269.2975 122.722 279.7975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+59 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://rlang.r-lib.org/reference/defusing-advanced.html)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 186.2975 82.568 196.7975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+60 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://rlang.r-lib.org/reference/as_string.html?q=as_string#ref-usage)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 167.7975 93.431 178.2975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+61 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://tibble.tidyverse.org/reference/rownames.html)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 84.7975 145.383 95.2975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+62 0 obj
+<<
+/Annots [ 39 0 R 40 0 R 41 0 R 42 0 R 43 0 R 44 0 R 45 0 R 46 0 R 47 0 R 48 0 R 
+  49 0 R 50 0 R 51 0 R 52 0 R 53 0 R 54 0 R 55 0 R 56 0 R 57 0 R 58 0 R 
+  59 0 R 60 0 R 61 0 R ] /Contents 76 0 R /MediaBox [ 0 0 612 792 ] /Parent 72 0 R /Resources <<
+/Font 1 0 R /ProcSet [ /PDF /Text /ImageB /ImageC /ImageI ]
+>> /Rotate 0 
+  /Trans <<
+
+>> /Type /Page
+>>
+endobj
+63 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://purrr.tidyverse.org/reference/map.html)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 685.2975 73.116 695.7975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+64 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://tidyselect.r-lib.org/reference/all_of.html)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 602.2975 77.842 612.7975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+65 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://tidyselect.r-lib.org/reference/everything.html)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 583.7975 98.6245 594.2975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+66 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://www.rdocumentation.org/packages/kableExtra/versions/0.1.0/topics/kable_styling)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 500.7975 109.496 511.2975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+67 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://www.rdocumentation.org/packages/kableExtra/versions/0.2.1/topics/column_spec)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 482.2975 109.9635 492.7975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+68 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://www.rdocumentation.org/packages/kableExtra/versions/0.3.0/topics/row_spec)
+>> /Border [ 0 0 0 ] /Rect [ 55.64 463.7975 94.8505 474.2975 ] /Subtype /Link /Type /Annot
+>>
+endobj
+69 0 obj
+<<
+/Annots [ 63 0 R 64 0 R 65 0 R 66 0 R 67 0 R 68 0 R ] /Contents 77 0 R /MediaBox [ 0 0 612 792 ] /Parent 72 0 R /Resources <<
+/Font 1 0 R /ProcSet [ /PDF /Text /ImageB /ImageC /ImageI ]
+>> /Rotate 0 
+  /Trans <<
+
+>> /Type /Page
+>>
+endobj
+70 0 obj
+<<
+/PageMode /UseNone /Pages 72 0 R /Type /Catalog
+>>
+endobj
+71 0 obj
+<<
+/Author (OpenAI) /CreationDate (D:20260624133946+00'00') /Creator (\(unspecified\)) /Keywords () /ModDate (D:20260624133946+00'00') /Producer (ReportLab PDF Library - \(opensource\)) 
+  /Subject (\(unspecified\)) /Title (R Library Functions by Package) /Trapped /False
+>>
+endobj
+72 0 obj
+<<
+/Count 5 /Kids [ 4 0 R 25 0 R 38 0 R 62 0 R 69 0 R ] /Type /Pages
+>>
+endobj
+73 0 obj
+<<
+/Filter [ /ASCII85Decode /FlateDecode ] /Length 1080
+>>
+stream
+Gatm;h/Car&:a.UEK>X;nbG8M8.5glJO/1k[)ob\2D%KM(k4\]0@$l*\C,>s2U7llqq[$Unf_uK@ea;K!Br-p_`7c*=C)(ZVI4ZMT9bD-Mc&NIU0qSt1PLPA%[^.[lN3I9,XCR2quRkc[1\GI/BO;&`%AXt>2IbZDdiGDQL?r_Cpm6cW7fsEY\@-Dg"jR=Tj82RY3fZLh3;dJVljEM&,UBq7sHhs9/:`9k8qpCA^Z[$UgYZJ)_r0<[nZtqYKf6dRR<bJE%XCpn$NG;5V<p-8@tt9Bc!OYkEBUjd+>0"S^#ahlX&:X*'W(($AD#:Q/P)+kCh><lpJ\_K8E,Jd33)LgF+m7<a%Xiq.SNVVhd2^o_ZA;>48JlWp,;A=V#.i-0,rGlaG@@UX=d&c#?=DB^\JsmFI&0h%$9:KsIhR^YO$"FBEd;Ko5e.h64G&+&$'@:kWf3'MeWP/1:sKZkm=_iL8akku'uQ!bY-"[*j`+V'SG6OODOB4[V`ek\@VV7r\GHViY3\a<XegUFZHs*1)BK:Vp.P)7j=9Sfjd_Y<l:X,dJh)KoC6`\IbqF[d"R0euuoTp1,H(;;>k\XBjehq?f,]Y.158jknLlYaOXSAg`JhGig"SV%1%#=;S\\]dtr1r@52O0Dt'r5%EMZ0`fN>6!(u\@H_3Pb0*/o5jaKM$Xs_6KH'5FUg976g8B<tK)_$j4L.)(m_=U)W_:[Upro^rCm]<;MbGt:Fa#$,fr-UdOHeEBf@=H_V1$M-QLkN*YuLVFr<]+%EFFuKWA*!L[lLP$VCIAnrl[j"8sOP0G2K05Diu/QUCml_FHJ.k6aKs5dRhU&Q:_eKj<<1u\h8E$Z;IIr&L(_JWr'NeeE\9+Q,q"5g3kFaa'D7un'ga!/(;V_6mn&"I%fGY"`n0@lD2Irk<m_fm5).M)LbD__KNRaqXFd(#<AEPr/$BYAju['oah#?U^:s:kF7:+n`*1^3ep9?hBj8N#Esn^P<AI?P:!q:3kG)^)B)+k\EudTG_m?Md762+UGUccUHH1W%GfO/S;*+(btW6-HpQ?s+"dMOZ+<'O!\4jeoZIChrW6^CNa_~>endstream
+endobj
+74 0 obj
+<<
+/Filter [ /ASCII85Decode /FlateDecode ] /Length 2249
+>>
+stream
+Gau`V9lo&I&A@sBm*Wp70E?P\V`(M9e*3QG4?_d-;4u0e*st9eEIWBQ+:6JQ/W(/s[7;!h"W,@;`PVdc"r)QTrL9)Q^YQ]e'a)J7-3NBD+)_(0hf$fST(SE%(_RJTjhte'87NdV+4223&l:,eTPi!VXS3e2S5?<K;8U^j$0Qer>7(3BgjFjGf>c46[dTF,T@CQ/,2XfB*[,="[)qW+6`k5pQ2`ADY^(nm8ACh4M74!4Y\TaIG7jS*(ZINNL!Us&d5g_a*r,hcHd%D\mt.EES%lVq#_[mV2D9Km&c-3?5;pNFk`Ee6dg!ig'G(am=A/cm'!g-QcMS/P-pp@/M'm]dP!hG%&b.-D?Gas2be7D/aG]gL%mBIKq;)^40e%^bLj9Us;e<s)O.l_=@u`/8m*c&!F+/dTlHOZfnT.]B4L6_(^p>+)iL)%uG\1d&kCh/CNr8!fK4*Q>(EJ&pr2a7?a)XZSQ40`5rS18D)sfO@9k\^?]4dd4#U@_^+u-@Xa\4<**kCRXlpWO8/4?'mV2=qEV^gTkD']08NWuMhg]YR]?m7=b@c()69;_#>/<V:KU&[gT!YQkHd,,Z/nS+qL$oE2AW01V:rVkgc'ODI`:_4Q)&&psMT-5p&(3$q_&KI!t[Sc`cUY".s"p$cgD@6d&:iAP@ZiMcHEF*q3RlbtREIBnJo]cM+\h*0IG_B+m4f];3[FjKVr=`bUQ%cph?K/W=Fe^U/We-eA;lS#?>LA8@*DQ8#8J&)V-]E_0^UQp1oNYGkF+*%<C\Gl^]"46.1#5`a&cjds5[H<*rn6H.q6h$W!$E'AHn.K^J:Zj_Y"DhSLj7LlWp:sYY-!XHE4n$k/*hS42rM'Q;E&P7Vk1YNB]L$Xe]WQ>mfc?kX7a=oLi0>r]Llsmh%0k/500p7O=6T!)&ZIH\/.RaiSb7i(LqU/2)M<jS[6:2h:tS5/%L\]"MWJon0qWPHqHL>/dK-hotqdAA!D`LcX5h0%TJ)gWj^\*@!)YjJOst%eoF9XE*-@1.2nJ$ZfIkP1,"=G#K8klH-F8Z3>p6V28?U?;S?!gS?j)4T7hM7Y#i"t\27lPXLcqQ%#2+G^!Y(LdXGf1%2N4db/i;R;L=^Z1NY4t]Yr%O'`n]sk&Ohd:m9Pid+f"RkcG,7_W/UKmt>R(SHF3Io0fO>^/KUDMk:UMVS8>On2F9\<J-T!T`d-p?L3&h]jt\d8U5tA&K<lgh)*?@#QS)2MmhlL<PSK-Gp!tQWU3B(!E,n#?.d@h8Fm`t;5A%PlnWi>^-#Xp@Gk)t-]>fX.l5/jiB)d>1:h%FO(i;He]=M.$28V76]Eur[;M`([)W2.NRMRS/G12"-#>T:[Ugo;iuF/&Yu#cZb!0D_<LuP7Z4dF\/TpbJ)"P]2KMHDr=J?a.:#4lEa/3Q&ZRemne8<Qg9d08*c/R:7)"U:c*&2jborAt+-W-IoF//+:Dnip7M$Y<^+?L^_\kVWYk^FjF<?N5h<.`BU[+,WJ3;udBb8ll7"ZN1AV6]P%5GZK]ICRJL4&UrSEu7]*>u>h5C>I!5<*n].,K\-;lp\(B@3'(K75Ef%iCNK]Q7q*J-7H1\XdmYd1"=[MrdNs0%B4(YD)M`7*d;t=54cE%PKtWHEiF_ZU$=PK2M]sBet7Ot+3-KYCcsfIj#]Y!n=_1@nsk>krER-kS\b%dQ%\Jb=$R(Oq(Y^BG:7jfAp.9'M`83_!p0Qplr<gtW^Z7@7o<_`h,<m6\u6]_JK)L3$T<diA3C#QPZ7#,^Bfu;=506aH:5pCG/]t*S;);5BYS"t\QL:A70k);[FX.dL(P`AYURi:;21@I9oM`?=Ph\YNAj<*738[qJMF9\CIGgF2QSY&nmQEQ3/4uld\W&]IPWJ:9*DRu+tq/'W[?5J4-@['?.3HOroN&;^Ui"elg3nT4W[SNmRemQgR@N8@?/;L>$7^![B[L+1`IF>%p9l-OSte1MNRJ*^pSnJUtK5GL9KF%[i5jq^;Z#:n=TLOI"n]V&5b`04;/?V)lP;WKEq#)%`HQi<6e_fO=D4A;#7PX:2173kFV-;d@J85%CY]/I'@a;c=TkoS^$"ORlq1(2L@C8bSg1`1"WS`*cjE$]lUV))(g+#b3]5<Ze.?Pj*\5l[4A0(\@]AhAko-,Mn+#mp<_Jqm%(KYnS#aS=)O(_S]0GG)e5WHYD;[Z$?n6o47ZZ;?4Nh*!-fp$2e10.\o%"edu\$?+(N*+@e-;+)Y2q+oDccA&-'W=i=+$2"2Qc9f`~>endstream
+endobj
+75 0 obj
+<<
+/Filter [ /ASCII85Decode /FlateDecode ] /Length 1626
+>>
+stream
+Gb"/'gN)%,&:O:SlslK`&HW)RY=[d"FP</&;>]'u85OoUM[GWUe$&3A]SNj>;&Ap]S_@Q]`.GVE_m;j8:iPojgAc.&n9tE,mO1m9M\IQe*#:cUa2Q<l2k;6OL5>W\4Q/-fSIc(iJ`B0a49m5^k`r]0G2>C-LkDa5LG8@f_jd:;8qQpL/083hei4SMk+)3o[.YOr[F@NmKsW;g>*VM[V-]!Fr?2hVIYEc;^S&?([niC\&DT#.!p1-Ia(IdJEP*tnkCi^`i#[?Ye.(1L8NU=t^Umt]KS:X-&,iB*7:#<!H6(8*/d\GN'mL+->iGbp4Mp$BL,d`sd^SGer-"!3\8M\1!p4J*4UN2g@cfIWXuG.sq^6XNi<>fUFFn-tchAEaBu^6=hll3;qfRN!O9kUWFY"J851t7&/:lGM9`n\J6e([;aCU-ZPQX,W6Xkt73Z,jJnZJpIK3Y5%a$RI%^j!)A[FuU[JI`<Zoc;R7[t2%@80i;/OB\_,1>RFuE?pYcG`\]+6o=JGb7$T'k/t-#H97O,q%O+p,^oU,9Upo;XD(!aL8.hcFM[1A@!AWR:m)/71qrCCQ;rVE6!blnX2m#k4>n!NW%X,*BB'\mH4$TfN`X*iU!,Gi/M"W0>%YXu#fe\p<NK_^(bTCu,\7!FP=r#eGSF><AL<IjkdpB5%Fs1MB0$huql35f74tLr*+sUETHBeA/RlZ#?H\XO?rMTQ_XG=PKN-JE>0FCJME#Aa<NPP-q2BNL/tXU)7C#A9hKorS3Zm"56k6sCls/%D4\qbGkJI(DUU$[a3g#\2@<pT1>-)_inZ)*!LaPogJ%^h]4unVPOZsqcI?2b%5@6c^SFN:2\A=Wnof1njBq<>)/.tp;!B9(aRJ4(+$%EB*+Iig0(>otR4WDCQPDFMl^290;K(k1_eeYZZWVL.@JVlm.3*E+9$EPPU.\Ng'k"/Pc\'L/%3c?cn/!>[bWcJ:<;lRO-)/@)EJA#Vcq5"5+LC:%1efkbr\Q">Ci[rO;D!1XYqe6ui&r#^<&PIcq5u*oni!Ka+XXo$=`4Dp(,rJT4Q?L#d$scP?->]sKMF)bU[Rk3j5UDE2-Eu=gH6olkZ>MKWFa[MJ$H3aB/lO<G.2*DG:'Ha<20-7XWZsJY2BPS+5^77i?;%./#`c6]91?J`+7HNeG%9U+>Ws8HO4H>kLUZnU1.Asgle5<Y,'8G/HW9!$V>c!p%lYb!iBe8,TkhO(Vh)WI4(00mNEZ4llOV`#"$g:YlK=_/3G2u1^LFqgF"5O@b]oMaNW3Ck=+^tZrP=*G@G\HbK>h.+2XKK0$]b+0gT:,RHdQ'%7ITDZf[&7u]UuYL]`hQgcf9!AI,gI.@6Nb'n)'edNjbm6g4(%$oVXFID*0fBUum>OTs`C*^\59IY&im5d,)Zr(M?(d*^+?$kH?pn\0Ae(LC^_j'T.;!Z*RHqkY%OLVn/1)UJ%B<[r"e:M!nU--@$j$2=<c]1>A0#6p-bbJMi<ff7f#l<G&1MmD:ArD1Ar7<jZ;_90'VWf"5/[(HQ3S_*W@@PA9Q>6J#*\LQ><DBKZ()df5l'meS4$cJQp8\,KT:4oS1+IZNG;q!e)\>Mg0=DflB\+L"R@b<s;Vs+MA7h-d0i\G6fW<!9r~>endstream
+endobj
+76 0 obj
+<<
+/Filter [ /ASCII85Decode /FlateDecode ] /Length 2501
+>>
+stream
+Gb"/)997gc&AI=/n<ato7\no)X_AE@&"lK04U!NQRC8OIiKDX#m]Z)@P%_Dl2(_JS6d[Hj.rhBDkgRa71Sb<Ii.m]W=b4q\pZV93Jd=g>CIA4DT_i*Dg\Ve:^??i!(8NqT`c48la@d'SK%LH0KL67S#a--T"6m1J!Q?*bja3AH`WEjOSS^=n^-hX%d/E]BdGX:4^eleqp*7`!;DNM_l__m@;3_JgEl1N>2d`9?!UX"_(%_sBI/noejITBg;]klK4<mD$(FBG:a$E,R+G@KnnRMT+7XN3Ms8!`>+:K6HId!-!?%.k_F$6,>&)qA:/)_7.L5Fn$;fkMB*$WMPqKl&:J,2f)!eSH/iA@E?!2-6HkGM;Z9rK/fgO.nX).)hBRV<\N1t+Fu8Mg.'969%IUmY,YB$\4\1J,mJFJ>0kd7p'^`2T0%2eaVWV)bB].#nCrhCuUaR:@TWa]Z<K$-Y<7%CLI.QDl/g)n?Mmg,'JM<q?V@&01G/OC5tZ7/N]jKm+Op4\6'87)56iVYH"K9T%ZF=l:G'WK)02d3.eb5iT_?PJH\5;kf?A%?`^Dit)q2BEuUAm*9\El-r[Y1c.<L<:Z1eI'FL\ecj+AfEhJ-7:$lD+BhH*$:g08l/j7Pk58oT<%+g<VLSfs-rFjnZROoL;GFSg9OCX\E*6srHV7Y<]\7Fp0u`Z/A;s[8KIuD>e2\T)[E*._FSb60*EkK9fO$Vq.3trW!4?Aq;QLXKI/q>H,%J0<F!XLX^5/?Cc%R-sE>&)BJLd1Xe_C>`dEIHO]oa;3dtJ,YWg-\EJT$DY*-9)6n4j92GR6<tOSO:L-^_ioB]PPFXPC=Y40`lOGb6HgG<Q8n>ugG27Nh=.-3[W9r1^MpE0%OP95mS"d?&3Uea+'pK+##\TbA#bY:!;?;ZU"?!2toX;\T3L=0I\l!$.u@1n"ue=d(XSi6ia8d/fr7LuRs#f9GEC>\FUASX`H4l2a6&bc=[]>#kepD3+"Jd7^7FTF4*QLZ9CPkHr3Wb?]84^s\(\rP>hOP,:)eR_0D[2F/<]"f)Tk5(5b"c<878@QLQTi/S=QkMq`+)AIubcP?KXo(.&A;>0#F>a,H^j>XTIi]0-2$g"(Y;`W9"#f/';-!+?[@D.iSc6euQTTLLj%5M5;NlS2TXLNER2R%4B5hD!Kg^C%q]W=g?eqrM)\Edoa#;)D`PuWe\r7Z2e"00p00;4O3:XkogU3`.6<Prg]"("t;p*?n%,C?:I\flJT7CcTPmE1.Ud+52H:K>3;>Rbq`pWC+]\6NX`>dKP>['3jlhDl$U])6M5Fu8kr!!X4KdIR5RS!"<r1;:-P20nUVC1u`tXPWqV9*WlNku]li3U]('2g;>2k_kObq*G]6m$;H2H!Y(MG%>"F7*L*9eP+kN5_`j3A+sY<WAZVpBM$WcerD#5k]m#-ShH`OE5h"ee;42)au:k5TInK6:p0#(^im?fcn7*?,[UlV4qYtKV%d[F!QZ3]od`;mF5\"rPh^e%<\^g5F8=kDd$_0ojB8i*;X),(hA&AF<LX5Z2ZRDd_6I_TAtb>DEIAG>0V-TI+gR;Rr:17miSmKV>kRg;e;7<,%'ottqs#GNm'd%PnLNe"H\$EUgM,-V/>9egKHn])<rs`$])b@YpJO;llLMujTeih%BMRncP*N)NSCZosUUi_OIt:7)U<X8t1H2IYl2?n9lH@H1N8Ef-HGd&,$;+As]%[o[Rrc$=LJ95sKSXL^FI95/X7Be(kDG!?R*@",*(8h8;SamHM_/QlQW)2ai!h\e&AuD%X^O&=S7UGuM;fM<5K!LS06!FNSo,bc?Q0,t2-:&/%%1UD2^OB"1IWC$QqCk/5C,BQ%Bf!XkO*8419JKb=de_#-#d\@boW^HR'U+r2^3U*5.9K`pX)UWR?`Kj;$+d]h!?OpM)hmt8rjTE[c:u?cq;Mb0@S[-]gNssEO-Hp-0EFoK&e>2@lnROq5hN)=W&AQ#or^"B)f"MR$1hh#Bh'sqba[UeW615qZc&rb8`Y%d%nTd%lQZekkEsUp$_puq42Q@h^Lc7o<-e9^LGMQDjF;&/f!1/N&1mEhm`XZ)j3]8r`8oY'5"al4*!75NaaC_kkO!K\cfaoYC9?,_HB^Z`8/2o=\U]ueS@<da4f44l.-S1#ZXMGbkcb1@4m5)9F5AMbh[L>B&.>=X?N*p8!3YY0YTs>:GVbU,]J;:BG`kR!L-n*O]QLPbZVJr`'9),:9KNT-U)$"rOh847l\71RE?Fr<W&sYj(A8A0uf`+16$6Fa"NkO;B:YX/!Aeo*ON^h%6diY9Ptc^:u*a=JN:n'J#1bkTu/_1%sobL2[m)r*UYnobf?pISu%C#]H*n\r5t"&[++hD9`1ddg-]uoRLOQ>fuG<uT#e-3QV^Jam,51!oB_E)QrS:#JH=;]pWgkD<Le:;"4pugH-JXkEI'2=s'L=?DZuH&3"Ess%RA?T!cCk:Mmgr]ma)1H\sO;1?MZ;A$;S)"n6[cKU=;XiHLVNdj^mK~>endstream
+endobj
+77 0 obj
+<<
+/Filter [ /ASCII85Decode /FlateDecode ] /Length 1311
+>>
+stream
+GauHLD/\/e&H88.E?EZ(AOq^.9D3'eRfPl1[&F;s6\0cMkX:D:4Gmn>rV@N`aY/KUbHmZTM'_$KmeH;>3AM!kI[L/)Q2n\Ei8TUpj"Qr)'1BY&)W&fcr]09jYnJB.m)Orj8P!>66:=d"5U=;L#3Oc:@(g\332*8c:r:Uh$0ND[]a"9>Am\s>g)8Vk(4q3K6h^eBr6?^sKR$du2Qs.cC3-SYr*Q#2h%CJQI7/E$eimQY/*GEMMg.L=&D)^N6=h.3E?[^j$&RO?$_lQNckO.iM^sfQGW90Akjq5YN7mdpgfkWE.GcPE&k!id8N=@o0p,j#b[7,&pZXR5pi@J@4a&RW4ek23^=ohl8AI72o"hC9D_739BNT"Cr!kN?1Yc`KHH::_R'@4/i<Tt_FH`/@nO"\6rW,]R*fp@V%1paN7^;GjmLn@RmSP6$&4n:$779OPs'!49m5Xo&9">[JW>9h'=@F(d%u*@`_(]F+P8p3d+jt^HcTM0;=;8;`5crHTC^jRE&"j;9lH2FV8*O*Gg=fdGH"0-?).nS>:$(NJ+Yj\t+8G`pN'pdQ&I'!U/i*?JE-[rZQgek5b-K>RHuq&B54W-DDN3&OdNBU!m;mIgpFi(j0o#2..G[oejl:Ss771XGaMamSRo&-'c^#$7S_?5\/gF'QBn\2$BGk`RqC!5C,iV]E[jEg='(3J^JtIuC0KXb63W*gme#6^"4ial2g>\>=bRUX$DX7+/N]`aT55EuM+K^R1`0tV6]Xl/+:EPfuWR[kY#KIOD.Wt=jBObf+5`X>k/\=;FQmu\(\B/6.EH:Kd@mC[=auBr=rDf>`ID@ODLk>q[EF/s0h]Tul^+UY5RQT'Gn\aP]c`c25aVAruXR=pVpEhQb65`l=$/2A[rbe2MRG$'1^nUg>5<Ee^4ltiY$fe<QQ+'hl`gL%c"'(B&Jk7d[J[llQ?(p/*[moanDBUA`G9lnPp'tut_qZnboTRDC55H;Y@H,[qSVho-5[o$6g!Aj2D.ApO"9r>53X02!"2.L/(YuJ(%t]jBDU%:>O3,cY=SIL@PZMSHAkr5,c1Km0+5U;>]JcUlFq;?[Z@PV6!\Z_Kj,R\hRtXUEY)No]m57QIiJt,3C,pCf]Y`72-C,/3(MT7&69(`qUM9"3;kQ8GQ":2\(sN((*mb:WR"rD/O8Jh49'L%+gmGde^E1uIHPb_U;2F&A;$9+FnVnkRl!H07]@cMEgVGkd*/IHObM`<Eg?M<JfRMq[Qkju4G7\\[eY?b%qk,+5e(.etPun"Ojr/NGobin&?$@bmh3q;]?VK?p3plY`cMdq2r]AO~>endstream
+endobj
+xref
+0 78
+0000000000 65535 f 
+0000000061 00000 n 
+0000000102 00000 n 
+0000000209 00000 n 
+0000000321 00000 n 
+0000000516 00000 n 
+0000000738 00000 n 
+0000000960 00000 n 
+0000001142 00000 n 
+0000001361 00000 n 
+0000001544 00000 n 
+0000001725 00000 n 
+0000001946 00000 n 
+0000002167 00000 n 
+0000002389 00000 n 
+0000002570 00000 n 
+0000002795 00000 n 
+0000003017 00000 n 
+0000003239 00000 n 
+0000003459 00000 n 
+0000003684 00000 n 
+0000003922 00000 n 
+0000004142 00000 n 
+0000004325 00000 n 
+0000004505 00000 n 
+0000004726 00000 n 
+0000005072 00000 n 
+0000005291 00000 n 
+0000005471 00000 n 
+0000005699 00000 n 
+0000005928 00000 n 
+0000006146 00000 n 
+0000006329 00000 n 
+0000006519 00000 n 
+0000006708 00000 n 
+0000006889 00000 n 
+0000007069 00000 n 
+0000007288 00000 n 
+0000007489 00000 n 
+0000007784 00000 n 
+0000008039 00000 n 
+0000008237 00000 n 
+0000008448 00000 n 
+0000008646 00000 n 
+0000008860 00000 n 
+0000009060 00000 n 
+0000009286 00000 n 
+0000009484 00000 n 
+0000009680 00000 n 
+0000009892 00000 n 
+0000010109 00000 n 
+0000010321 00000 n 
+0000010537 00000 n 
+0000010737 00000 n 
+0000010963 00000 n 
+0000011186 00000 n 
+0000011408 00000 n 
+0000011623 00000 n 
+0000011851 00000 n 
+0000012087 00000 n 
+0000012291 00000 n 
+0000012509 00000 n 
+0000012708 00000 n 
+0000013083 00000 n 
+0000013277 00000 n 
+0000013475 00000 n 
+0000013678 00000 n 
+0000013913 00000 n 
+0000014147 00000 n 
+0000014377 00000 n 
+0000014627 00000 n 
+0000014697 00000 n 
+0000014988 00000 n 
+0000015076 00000 n 
+0000016248 00000 n 
+0000018589 00000 n 
+0000020307 00000 n 
+0000022900 00000 n 
+trailer
+<<
+/ID 
+[<31b16ebc2b51fba8ff63d2e87c35f804><31b16ebc2b51fba8ff63d2e87c35f804>]
+% ReportLab generated PDF document -- digest (opensource)
+
+/Info 71 0 R
+/Root 70 0 R
+/Size 78
+>>
+startxref
+24303
+%%EOF

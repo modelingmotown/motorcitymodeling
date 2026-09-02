@@ -1,0 +1,367 @@
+---
+title: "Linear Regression Model for Council District V"
+author: |
+  | Elliot Dean - Program Analyst IV  
+  | Office of the Chief Financial Officer | Office of the Assessor
+  | City of Detroit
+date: "`r sub('^0', '', format(Sys.Date(), '%d %B %Y'))`"
+geometry: margin = 1.5cm
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, error = FALSE, echo = FALSE)
+```
+
+```{r lib_load}
+library(tidyverse)   # data wrangling & ggplot2
+library(janitor)     # functions for examining and cleaning dirty data
+library(kableExtra)  # simple table generator
+library(here)        # Find files within a project
+library(olsrr)       # package for p-value backward elimination
+library(broom)       # summarizes key information about models
+library(rlang)       # functions for Base Types and Core R and 'Tidyverse' Features
+library(car)         # VIF, influence measures helpers
+library(scales)      # provides the internal scaling infrastructure used by ggplot
+library(fastDummies) # Fast Creation of Dummy (Binary) Columns & Rows from Categorical Variables
+```
+
+```{r fun, results='hide'}
+codf    <- readRDS(file = here("rmds/modfunctions", "codfunctions.rds"))
+codform <- readRDS(file = here("rmds", "codformulas.rds"))
+
+codf_env <- list2env(codf, parent = globalenv())
+for (nm in names(codf)) {environment(codf[[nm]]) <- codf_env}
+list2env(codf, envir = codf_env)
+```
+
+```{r data_import}
+df <- read_csv(here("data/city", "salesSFapr2023toMarch2025Updated.csv")) |>
+  rename_with(tolower) |> filter(ccd == 5)
+
+res23    <- codf$prep_cod_sales(df, origin_month = as.Date("2023-04-01"))
+df       <- res23$data
+ecfs_col <- res23$ecfs_col
+```
+
+---
+
+## Model I
+
+```{r mod1}
+mod_time <- codf$backward_p(formula = codform$formula_time, data = df, p_out = 0.10, verbose = TRUE)
+df <- codf$make_time_adjusted_df(df, codform$formula_time)
+
+codf$plot_standard_residual_hist(mod_time, df, ptitle = "Histogram\nDependent Variable: LN_SPPSF")
+```
+
+```{r mod1a, results='asis'}
+codf$model_metrics_A(mod_time, "District 5 LN\\_SPPSF model fit statistics")
+codf$coef_table(mod_time, "District 5 LN\\_SPPSF model coefficients (95% CI)")
+```
+
+```{r mod1b}
+mf <- model.frame(mod_time)
+row_idx <- as.integer(rownames(mf))
+aug_sppsf <- broom::augment(mod_time, data = df[row_idx, ]) |>
+  dplyr::mutate(pred_sppsf = exp(.fitted), std_resid  = .std.resid)
+codf$plot_residuals_vs_months(aug_sppsf, ptitle = "Residuals for LN_SPPSF Model")
+```
+
+```{r mod1c}
+codf$plot_predicted_sppsf_vs_months(aug_sppsf, ptitle = "Months vs Predicted SPPSF - LN_SPPSF Model")
+```
+
+```{r mod1d}
+codf$plot_price_index_vs_months(df)
+```
+
+```{r mod1e}
+codf$plot_taf_vs_months(df)
+```
+
+---
+
+## Model II
+
+```{r mod2}
+mod_ln_price_no_ecf <- codf$backward_p(codform$formula_ln_price_no_ecf,
+                                  data = df, p_out = 0.10, verbose = TRUE)
+
+codf$plot_standard_residual_hist(mod_ln_price_no_ecf, df,
+                                 ptitle = "Histogram\nDependent Variable: LN_PRICE (No ECFs)")
+```
+
+```{r mod2a, results='asis'}
+codf$model_metrics_A(mod_ln_price_no_ecf, "District 5 LN\\_PRICE (No ECFs) model fit statistics")
+codf$coef_table(mod_ln_price_no_ecf, "District 5 LN\\_PRICE (No ECFs) model coefficients (95% CI)")
+```
+
+```{r mod2b}
+mf <- model.frame(mod_ln_price_no_ecf)
+row_idx <- as.integer(rownames(mf))
+aug_sppsf <- broom::augment(mod_ln_price_no_ecf, data = df[row_idx, ]) |>
+  dplyr::mutate(pred_sppsf = exp(.fitted), std_resid  = .std.resid)
+codf$plot_residuals_vs_months(aug_sppsf, ptitle = "Residuals for LN_PRICE (No ECFs) Model")
+```
+
+```{r mod2c}
+codf$plot_leverage_histogram(model = mod_ln_price_no_ecf, df = df, subtitle = "Dependent Variable: LN\\_PRICE")
+```
+
+```{r mod2d}
+codf$pp_plot_resid(mod_ln_price_no_ecf, dep_label = "LN_PRICE")
+```
+
+```{r mod2e}
+codf$plot_stdresid_vs_stdpred(mod_ln_price_no_ecf, dep_label = "LN_PRICE")
+```
+
+```{r mod2f}
+codf$plot_cook_vs_rstudent(mod_ln_price_no_ecf, dep_label = "LN_PRICE")
+```
+
+```{r mod2g}
+codf$plot_lev_vs_rstudent(mod_ln_price_no_ecf, dep_label = "LN_PRICE")
+```
+
+---
+
+## Model III
+
+### Initial Input
+
+```{r ecfcheck, eval=FALSE}
+head(ecfs_col, 40)
+```
+
+```{r mod3}
+baserh <- c(
+  "ln_landratio", "ln_base_bldgsize_ratio", "arterial",
+  "single_family1story", "half_duplex1story", "half_duplex2story",
+  "smallest", "small", "large", "largest", "two_plus_baths", "powder_room",
+  "good", "fair", "poor", "very_poor_unsound", "qabove_avg", "qbelow_avg",
+  "yb_pre_1929", "yb_1946_to_1960", "yb_post_1961", "crawl", "slab",
+  "ln_garagespaces", "fireplace", "hot_water", "elec_baseboard", "wall", "central_air",
+  "ecf_5R502", "ecf_5R503", "ecf_5R504", "ecf_5R505", "ecf_5R506", "ecf_5R507", "ecf_5R508",
+  "ecf_5R509", "ecf_5R510", "ecf_5R511", "ecf_5R512", "ecf_5R513", "ecf_5R514", "ecf_5R516",
+  "ecf_5R517", "ecf_5R518", "ecf_5R521", "ecf_5R523", "ecf_5R524", "ecf_5R528", "ecf_5R529",
+  "ecf_5R530", "ecf_5R531", "ecf_5R532", "ecf_5R533", "ecf_5R534", "ecf_5R535", "ecf_5R538",
+  "ecf_5R539", "ecf_CGRS6",
+  "months_1to9", "months_10to16", "months_17to24"
+)
+
+formula_bas <- reformulate(baserh, response = "ln_price")
+
+mod_base <- codf$backward_p(formula_bas, data = df, p_out = 0.10, verbose = TRUE)
+
+resbase  <- codf$assess_ln_price_model(df, mod_base)
+
+df       <- resbase$data
+df_in    <- resbase$data_inliers
+resbase$rrmetrics_kable
+```
+
+```{r mod3a, results='asis'}
+codf$model_metrics_A(mod_base, "District 5 LN\\_PRICE model fit statistics")
+codf$coef_table(mod_base, "District 5 LN\\_PRICE model coefficients (95% CI)")
+```
+
+```{r mod3b}
+mf <- model.frame(mod_base)
+row_idx <- as.integer(rownames(mf))
+aug_sppsf <- broom::augment(mod_base, data = df[row_idx, ]) |>
+  dplyr::mutate(pred_sppsf = exp(.fitted), std_resid  = .std.resid)
+codf$plot_residuals_vs_months(aug_sppsf, ptitle = "Residuals for LN_PRICE Model")
+```
+
+```{r mod3c}
+codf$plot_leverage_histogram(model = mod_base, df = df, subtitle = "Dependent Variable: LN\\_PRICE")
+```
+
+```{r mod3d}
+codf$pp_plot_resid(mod_base, dep_label = "LN_PRICE")
+```
+
+```{r mod3e}
+codf$plot_stdresid_vs_stdpred(mod_base, dep_label = "LN_PRICE")
+```
+
+```{r mod3f}
+codf$plot_cook_vs_rstudent(mod_base, dep_label = "LN_PRICE")
+```
+
+```{r mod3g}
+codf$plot_lev_vs_rstudent(mod_base, dep_label = "LN_PRICE")
+```
+
+### Filtered Input
+
+```{r mod3i}
+mod_base_inliers <- codf$backward_p(formula_bas, data = df_in,
+                                    p_out = 0.10, verbose = TRUE)
+
+resbasei <- codf$refit_inlier_ln_price(
+  df = df, df_in = df_in, formula_base = formula_bas, mod_base = mod_base
+)
+
+df_in            <- resbasei$data_inliers
+dfa              <- resbasei$join_data
+df_in1           <- resbasei$extract_data
+```
+
+```{r mod3ia, results='asis'}
+codf$model_metrics_A(mod_base_inliers, "District 5 LN\\_PRICE (Inliers) model fit statistics")
+codf$coef_table(mod_base_inliers, "District 5 LN\\_PRICE (Inliers) model coefficients (95% CI)")
+```
+
+```{r mod3ib}
+mf <- model.frame(mod_base_inliers)
+row_idx <- as.integer(rownames(mf))
+aug_sppsf <- broom::augment(mod_base_inliers, data = df[row_idx, ]) |>
+  dplyr::mutate(pred_sppsf = exp(.fitted), std_resid  = .std.resid)
+codf$plot_residuals_vs_months(aug_sppsf, ptitle = "Residuals for LN_PRICE (Inliers) Model")
+```
+
+```{r mod3ic}
+codf$plot_leverage_histogram(model = mod_base_inliers, df = df, subtitle = "Dependent Variable: LN\\_PRICE")
+```
+
+```{r mod3id}
+codf$pp_plot_resid(mod_base_inliers, dep_label = "LN_PRICE")
+```
+
+```{r mod3ie}
+codf$plot_stdresid_vs_stdpred(mod_base_inliers, dep_label = "LN_PRICE")
+```
+
+```{r mod3if}
+codf$plot_cook_vs_rstudent(mod_base_inliers, dep_label = "LN_PRICE")
+```
+
+```{r mod3ig}
+codf$plot_lev_vs_rstudent(mod_base_inliers, dep_label = "LN_PRICE")
+```
+
+---
+
+## Model IV
+
+```{r mod4}
+tasprh1 <- c(
+  "ln_landratio", "ln_base_bldgsize_ratio",  "arterial",
+  "single_family1story", "half_duplex1story", "half_duplex2story",
+  "smallest", "small", "large", "largest",  "two_plus_baths", "powder_room",
+  "good", "fair", "poor", "very_poor_unsound",  "qabove_avg", "qbelow_avg",
+  "yb_pre_1929", "yb_1946_to_1960", "yb_post_1961",  "crawl", "slab",
+  "ln_garagespaces", "fireplace",  "hot_water", "elec_baseboard", "wall", "central_air",
+  "ecf_5R502", "ecf_5R503", "ecf_5R504", "ecf_5R505", "ecf_5R506", "ecf_5R507", "ecf_5R508",
+  "ecf_5R509", "ecf_5R510", "ecf_5R511", "ecf_5R512", "ecf_5R513", "ecf_5R514", "ecf_5R516",
+  "ecf_5R517", "ecf_5R518", "ecf_5R521", "ecf_5R523", "ecf_5R524", "ecf_5R528", "ecf_5R529",
+  "ecf_5R530", "ecf_5R531", "ecf_5R532", "ecf_5R533", "ecf_5R534", "ecf_5R535", "ecf_5R538",
+  "ecf_5R539", "ecf_CGRS6",
+  "months_1to9", "months_10to16", "months_17to24"
+)
+
+formula_tas1 <- reformulate(tasprh1, response = "ln_tasp_re")
+
+mod_tasp1 <- codf$backward_p(formula_tas1, data = dfa, p_out = 0.10, verbose = TRUE)
+
+dfa <- dfa %>%
+  mutate(
+    pre_3 = predict(mod_tasp1, newdata = dfa), esp3  = exp(pre_3), ratio3 = esp3 / tasp_re
+  )
+
+rrmetrics <- codf$ratio_metrics(dfa, esp3, saleprice)
+
+knitr::kable(
+  rrmetrics,  format   = "latex",  booktabs = TRUE,
+  caption  = "District 5 LN\\_TASP Model I assessing coefficients" 
+) %>%  kable_styling(latex_options = c("hold_position", "striped"), font_size = 8)
+
+tasprh2 <- c(
+  "ln_landratio", "lnsbldsfint",  "arterial",
+  "single_family1story", "half_duplex1story", "half_duplex2story",
+  "smallest", "small", "large", "largest",  "two_plus_baths", "powder_room",
+  "good", "fair", "poor", "very_poor_unsound",  "qabove_avg", "qbelow_avg",
+  "yb_pre_1929", "yb_1946_to_1960", "yb_post_1961",  "crawl", "slab",  "garage", "fireplace",
+  "hot_water", "elec_baseboard", "wall", "central_air",
+  "ecf_5R502", "ecf_5R503", "ecf_5R504", "ecf_5R505", "ecf_5R506", "ecf_5R507", "ecf_5R508",
+  "ecf_5R509", "ecf_5R510", "ecf_5R511", "ecf_5R512", "ecf_5R513", "ecf_5R514", "ecf_5R516",
+  "ecf_5R517", "ecf_5R518", "ecf_5R521", "ecf_5R523", "ecf_5R524", "ecf_5R528", "ecf_5R529",
+  "ecf_5R530", "ecf_5R531", "ecf_5R532", "ecf_5R533", "ecf_5R534", "ecf_5R535", "ecf_5R538",
+  "ecf_5R539", "ecf_CGRS6",
+  "months_1to9", "months_10to16", "months_17to24"
+)
+
+formula_tas2 <- reformulate(tasprh2, response = "ln_tasp_re")
+
+mod_tasp2 <- codf$backward_p(formula_tas2, data = dfa, p_out = 0.10, verbose = TRUE)
+
+dfa <- dfa %>%
+  mutate(
+    pre_4 = predict(mod_tasp2, newdata = dfa), esp4 = exp(pre_4), ratio4 = esp4 / tasp_re
+  )
+
+rrmetrics <- codf$ratio_metrics(dfa, esp4, saleprice)
+
+knitr::kable(
+  rrmetrics,  format   = "latex",  booktabs = TRUE,
+  caption  = "District 5 LN\\_TASP Model II assessing coefficients" 
+) %>%  kable_styling(latex_options = c("hold_position", "striped"), font_size = 8)
+```
+
+```{r mod4a, results='asis'}
+codf$model_metrics_A(mod_tasp1, "District 5 LN\\_TASP Model I fit statistics")
+codf$coef_table(mod_tasp1, "District 5 LN\\_TASP Model I coefficients (95% CI)")
+```
+
+```{r mod4b, results='asis'}
+codf$model_metrics_A(mod_tasp2, "District 5 LN\\_TASP Model II fit statistics")
+codf$coef_table(mod_tasp2, "District 5 LN\\_TASP Model II coefficients (95% CI)")
+```
+
+```{r mod4c}
+codf$plot_tasp_vs_esp_by_style(dfa, tasp_re, esp3, sresb_style)
+```
+
+```{r mod4d}
+codf$plot_tasp_vs_esp_by_style(dfa, tasp_re, esp4, sresb_style)
+```
+
+```{r modsss}
+d5_mod_time_23_25 <- mod_time
+d5_mod_ln_price_no_ecf_23_25 <- mod_ln_price_no_ecf
+d5_mod_base_23_25 <- mod_base
+d5_mod_base_inliers_23_25 <- mod_base_inliers
+d5_mod_tasp1_23_25 <- mod_tasp1
+d5_mod_tasp2_23_25 <- mod_tasp2
+
+codf$save_model_bundle(
+  model_names = c("d5_mod_time_23_25", "d5_mod_ln_price_no_ecf_23_25", "d5_mod_base_23_25",
+                  "d5_mod_base_inliers_23_25", "d5_mod_tasp1_23_25", "d5_mod_tasp2_23_25"),
+  bundle_path = here("models/codmods/districtmods", "cod_district-5_23-25_31Mar.rds"),
+  manifest_csv_path = here("models/codmods/districtmods", "cod_district-5_23-25_31Mar_manifest.csv")
+)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

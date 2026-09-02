@@ -1,0 +1,619 @@
+---
+title: "Citywide Model Build - Geospatial Data: 2022 - 2025 Sales"
+author: |
+  | Elliot Dean - Program Analyst IV  
+  | Office of the Chief Financial Officer | Office of the Assessor
+  | City of Detroit
+date: "`r sub('^0', '', format(Sys.Date(), '%d %B %Y'))`"
+geometry: margin = 1.5cm
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+mainfont: Arial
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, error = FALSE, echo = FALSE)
+```
+
+```{r lib_load}
+library(tidyverse)   # data wrangling & ggplot2
+library(janitor)     # functions for examining and cleaning dirty data
+library(kableExtra)  # simple table generator
+library(here)        # Find files within a project
+library(olsrr)       # package for p-value backward elimination
+library(broom)       # summarizes key information about models
+library(rlang)       # functions for Base Types and Core R and 'Tidyverse' Features
+library(car)         # VIF, influence measures helpers
+library(scales)      # provides the internal scaling infrastructure used by ggplot
+library(fastDummies) # Fast Creation of Dummy (Binary) Columns & Rows from Categorical Variables
+```
+
+```{r fun, results='hide'}
+codf    <- readRDS(file = here("rmds/modfunctions", "codfunctions.rds"))
+codform <- readRDS(file = here("rmds", "codformulas.rds"))
+
+codf_env <- list2env(codf, parent = globalenv())
+for (nm in names(codf)) {environment(codf[[nm]]) <- codf_env}
+list2env(codf, envir = codf_env)
+source(here("rmds/cod2325/districtruns/d2325f", "spss_cod_district-7_23-25f.R"), local = knitr::knit_global())
+```
+
+```{r data_import}
+load(file = here("data/rdata", "cod_2022-2025geo_23July.RData"))
+load(file = here("data/rdata", "cod_2022-2025_July23.RData"))
+
+ecfs_col <- character(0)
+if (isTRUE(make_ecf_dummies)) {
+  if (!has_fastd) stop("make_ecf_dummies=TRUE requires fastDummies package.")
+  if (!("ecf" %in% names(df25))) stop("ecf column not found after rename; cannot dummy.")
+  
+  df25 <- fastDummies::dummy_cols(
+    df25, select_columns = "ecf", remove_first_dummy = remove_first_dummy,
+    remove_selected_columns = !keep_ecf_original
+  )
+  sales_df <- fastDummies::dummy_cols(
+    sales_df, select_columns = "ecf", remove_first_dummy = remove_first_dummy,
+    remove_selected_columns = !keep_ecf_original
+  )
+  ecfs_col <- grep("^ecf_", names(df26), value = TRUE)
+}
+```
+
+---
+
+## Model I
+
+```{r mod1}
+mod_time <- codf$backward_p(formula = codform$formula_time_g1, data = sales_df, p_out = 0.10, verbose = TRUE)
+sales_df <- codf$make_time_adjusted_df(sales_df, codform$formula_time_g1)
+
+mod_time2 <- codf$backward_p(formula = codform$formula_time, data = df25, p_out = 0.10, verbose = TRUE)
+df25 <- codf$make_time_adjusted_df(df25, codform$formula_time)
+
+mod_time3 <- codf$backward_p(formula = codform$formula_time_g2, data = sales_df, p_out = 0.10, verbose = TRUE)
+sales_df2 <- codf$make_time_adjusted_df(sales_df, codform$formula_time_g2)
+
+mod_time4 <- codf$backward_p(formula = codform$formula_time_2, data = df25, p_out = 0.10, verbose = TRUE)
+df252 <- codf$make_time_adjusted_df(df25, codform$formula_time_2)
+```
+
+```{r mod1a, results='asis'}
+codf$model_metrics_A(mod_time, "Citywide LN\\_SPPSF model fit statistics + Geo")
+codf$coef_table(mod_time, "Citywide LN\\_SPPSF model coefficients (95% CI) + Geo")
+```
+
+---
+
+## Model II
+
+```{r mod2}
+mod_ln_price_no_ecf <- codf$backward_p(codform$formula_ln_price_no_ecf_g1,
+                                  data = sales_df, p_out = 0.10, verbose = TRUE)
+
+mod_ln_price_no_ecf2 <- codf$backward_p(codform$formula_ln_price_no_ecf,
+                                  data = df25, p_out = 0.10, verbose = TRUE)
+
+mod_ln_price_no_ecf3 <- codf$backward_p(codform$formula_ln_price_no_ecf_g2,
+                                  data = sales_df2, p_out = 0.10, verbose = TRUE)
+
+mod_ln_price_no_ecf4 <- codf$backward_p(codform$formula_ln_price_no_ecf_2,
+                                  data = df252, p_out = 0.10, verbose = TRUE)
+```
+
+```{r mod2a, results='asis'}
+codf$model_metrics_A(mod_ln_price_no_ecf, "Citywide LN\\_PRICE (No ECFs) model fit statistics + Geo")
+codf$coef_table(mod_ln_price_no_ecf, "Citywide LN\\_PRICE (No ECFs) model coefficients (95% CI) + Geo")
+
+codf$model_metrics_A(mod_ln_price_no_ecf2, "Citywide LN\\_PRICE (No ECFs) model fit statistics")
+codf$coef_table(mod_ln_price_no_ecf2, "Citywide LN\\_PRICE (No ECFs) model coefficients (95% CI)")
+```
+
+```{r mod2b, results='asis'}
+codf$model_metrics_A(mod_ln_price_no_ecf3, "Citywide LN\\_PRICE (No ECFs) model fit statistics + Geo + Averages")
+codf$coef_table(mod_ln_price_no_ecf3, "Citywide LN\\_PRICE (No ECFs) model coefficients (95% CI) + Geo + Averages")
+
+codf$model_metrics_A(mod_ln_price_no_ecf4, "Citywide LN\\_PRICE (No ECFs) model fit statistics + Averages")
+codf$coef_table(mod_ln_price_no_ecf4, "Citywide LN\\_PRICE (No ECFs) model coefficients (95% CI) + Averages")
+```
+
+---
+
+## Model III
+
+```{r mod3}
+baserhs_g1 <- c(
+  "ln_landratio", "ln_base_bldgsize_ratio", "arterial",
+  "single_family1story", "half_duplex1story", "half_duplex2story",
+  "smallest", "small", "large", "largest", "two_plus_baths", "powder_room",
+  "good", "fair", "poor", "very_poor_unsound", "qabove_avg", "qbelow_avg",
+  "yb_pre_1929", "yb_1946_to_1960", "yb_post_1961", "crawl", "slab",
+  "ln_garagespaces", "fireplace", "hot_water", "elec_baseboard", "wall", "central_air",
+  ecfs_col,  # <-- splices *all* secf_ dummy columns in correctly
+  "months_1to9", "months_10to16", "months_17to24", "near_downtown_1mi", "near_downtown_5mi"
+)
+
+formula_base_g1 <- reformulate(baserhs_g1, response = "ln_price")
+
+mod_base <- codf$backward_p(formula_base_g1, data = sales_df, p_out = 0.10, verbose = TRUE)
+
+resbase  <- codf$assess_ln_price_model(sales_df, mod_base)
+
+df       <- resbase$data
+df_in    <- resbase$data_inliers
+resbase$rrmetrics_kable
+```
+
+```{r mod3gps}
+baserhs <- c(
+  "ln_landratio", "ln_base_bldgsize_ratio", "arterial",
+  "single_family1story", "half_duplex1story", "half_duplex2story",
+  "smallest", "small", "large", "largest", "two_plus_baths", "powder_room",
+  "good", "fair", "poor", "very_poor_unsound", "qabove_avg", "qbelow_avg",
+  "yb_pre_1929", "yb_1946_to_1960", "yb_post_1961", "crawl", "slab",
+  "ln_garagespaces", "fireplace", "hot_water", "elec_baseboard", "wall", "central_air",
+  ecfs_col,  # <-- splices *all* secf_ dummy columns in correctly
+  "months_1to9", "months_10to16", "months_17to24"
+)
+
+formula_base <- reformulate(baserhs, response = "ln_price")
+
+mod_base2 <- codf$backward_p(formula_base, data = df25, p_out = 0.10, verbose = TRUE)
+
+resbase2  <- codf$assess_ln_price_model(df25, mod_base2)
+
+df2       <- resbase2$data
+df_in2    <- resbase2$data_inliers
+resbase2$rrmetrics_kable
+```
+
+```{r mod3g2}
+baserhs_g2 <- c(
+  "ln_landratio", "ln_base_bldgsize_ratio", "arterial",
+  "single_family1story", "half_duplex1story", "half_duplex2story",
+  "smallest", "small", "large", "largest", "two_plus_baths", "powder_room", "totalbath",
+  "good", "fair", "poor", "very_poor_unsound", "cavg", "qabove_avg", "qbelow_avg", "qavg",
+  "yb_pre_1929", "yb_1946_to_1960", "yb_post_1961", "crawl", "slab",
+  "ln_garagespaces", "fireplace", "hot_water", "elec_baseboard", "wall", "central_air",
+  ecfs_col,  # <-- splices *all* secf_ dummy columns in correctly
+  "months_1to9", "months_10to16", "months_17to24", "near_downtown_1mi", "near_downtown_5mi",
+  "near_downtown_10mi"
+)
+
+formula_base_g2 <- reformulate(baserhs_g2, response = "ln_price")
+
+mod_base3 <- codf$backward_p(formula_base_g2, data = sales_df2, p_out = 0.10, verbose = TRUE)
+
+resbase3  <- codf$assess_ln_price_model(sales_df2, mod_base3)
+
+df3       <- resbase3$data
+df_in3    <- resbase3$data_inliers
+resbase3$rrmetrics_kable
+```
+
+```{r mod3gps2}
+baserhs_2 <- c(
+  "ln_landratio", "ln_base_bldgsize_ratio", "arterial",
+  "single_family1story", "half_duplex1story", "half_duplex2story",
+  "smallest", "small", "large", "largest", "two_plus_baths", "powder_room",
+  "good", "fair", "poor", "very_poor_unsound", "qabove_avg", "qbelow_avg",
+  "yb_pre_1929", "yb_1946_to_1960", "yb_post_1961", "crawl", "slab",
+  "ln_garagespaces", "fireplace", "hot_water", "elec_baseboard", "wall", "central_air",
+  ecfs_col,  # <-- splices *all* secf_ dummy columns in correctly
+  "months_1to9", "months_10to16", "months_17to24", "qavg", "totalbath", "cavg"
+)
+
+formula_base_2 <- reformulate(baserhs_2, response = "ln_price")
+
+mod_base4 <- codf$backward_p(formula_base_2, data = df252, p_out = 0.10, verbose = TRUE)
+
+resbase4  <- codf$assess_ln_price_model(df252, mod_base4)
+
+df4       <- resbase4$data
+df_in4    <- resbase4$data_inliers
+resbase4$rrmetrics_kable
+```
+
+```{r mod3a, results='asis'}
+codf$model_metrics_A(mod_base, "Citywide LN\\_PRICE model fit statistics + Geo")
+codf$coef_table(mod_base, "Citywide LN\\_PRICE model coefficients (95% CI) + Geo")
+```
+
+```{r mod3ageonot, results='asis'}
+codf$model_metrics_A(mod_base2, "Citywide LN\\_PRICE model fit statistics")
+codf$coef_table(mod_base2, "Citywide LN\\_PRICE model coefficients (95% CI)")
+```
+
+```{r mod3a2, results='asis'}
+codf$model_metrics_A(mod_base3, "Citywide LN\\_PRICE model fit statistics + Geo + Averages")
+codf$coef_table(mod_base3, "Citywide LN\\_PRICE model coefficients (95% CI) + Geo + Averages")
+```
+
+```{r mod3ageonot2, results='asis'}
+codf$model_metrics_A(mod_base4, "Citywide LN\\_PRICE model fit statistics + Averages")
+codf$coef_table(mod_base4, "Citywide LN\\_PRICE model coefficients (95% CI) + Averages")
+```
+
+### Filtered Input
+
+```{r mod3i}
+mod_base_inliers <- codf$backward_p(formula_base_g1, data = df_in,
+                                    p_out = 0.10, verbose = TRUE)
+
+resbasei <- codf$refit_inlier_ln_price(
+  df = df, df_in = df_in, formula_base = formula_base_g1, mod_base = mod_base
+)
+
+df_in            <- resbasei$data_inliers
+dfa              <- resbasei$join_data
+df_in1           <- resbasei$extract_data
+```
+
+```{r mod3igeonot}
+mod_base_inliers2 <- codf$backward_p(formula_base, data = df_in2,
+                                    p_out = 0.10, verbose = TRUE)
+
+resbasei2 <- codf$refit_inlier_ln_price(
+  df = df2, df_in = df_in2, formula_base = formula_base, mod_base = mod_base2
+)
+
+df_in2            <- resbasei2$data_inliers
+dfa2              <- resbasei2$join_data
+df_in12           <- resbasei2$extract_data
+```
+
+```{r mod3i2}
+mod_base_inliers3 <- codf$backward_p(formula_base_g2, data = df_in3,
+                                    p_out = 0.10, verbose = TRUE)
+
+resbasei3 <- codf$refit_inlier_ln_price(
+  df = df3, df_in = df_in3, formula_base = formula_base_g2, mod_base = mod_base3
+)
+
+df_in3            <- resbasei3$data_inliers
+dfa3              <- resbasei3$join_data
+df_in13           <- resbasei3$extract_data
+```
+
+```{r mod3igeonot2}
+mod_base_inliers4 <- codf$backward_p(formula_base_2, data = df_in4,
+                                    p_out = 0.10, verbose = TRUE)
+
+resbasei4 <- codf$refit_inlier_ln_price(
+  df = df4, df_in = df_in4, formula_base = formula_base_2, mod_base = mod_base4
+)
+
+df_in4            <- resbasei4$data_inliers
+dfa4              <- resbasei4$join_data
+df_in14           <- resbasei4$extract_data
+```
+
+```{r mod3ia, results='asis'}
+codf$model_metrics_A(mod_base_inliers, "Citywide LN\\_PRICE (Inliers) model fit statistics + Geo")
+codf$coef_table(mod_base_inliers, "Citywide LN\\_PRICE (Inliers) model coefficients (95% CI) + Geo")
+```
+
+```{r mod3iageonot, results='asis'}
+codf$model_metrics_A(mod_base_inliers2, "Citywide LN\\_PRICE (Inliers) model fit statistics")
+codf$coef_table(mod_base_inliers2, "Citywide LN\\_PRICE (Inliers) model coefficients (95% CI)")
+```
+
+```{r mod3ia2, results='asis'}
+codf$model_metrics_A(mod_base_inliers3, "Citywide LN\\_PRICE (Inliers) model fit statistics + Geo + Averages")
+codf$coef_table(mod_base_inliers3, "Citywide LN\\_PRICE (Inliers) model coefficients (95% CI) + Geo + Averages")
+```
+
+```{r mod3iageonot2, results='asis'}
+codf$model_metrics_A(mod_base_inliers2, "Citywide LN\\_PRICE (Inliers) model fit statistics + Averages")
+codf$coef_table(mod_base_inliers2, "Citywide LN\\_PRICE (Inliers) model coefficients (95% CI) + Averages")
+```
+
+---
+
+## Model IV
+
+```{r mod4}
+tasprhs_g1 <- c(
+  "ln_landratio", "ln_base_bldgsize_ratio", "arterial",
+  "single_family1story", "half_duplex1story", "half_duplex2story",
+  "smallest", "small", "large", "largest", "two_plus_baths", "powder_room",
+  "good", "fair", "poor", "very_poor_unsound", "qabove_avg", "qbelow_avg",
+  "yb_pre_1929", "yb_1946_to_1960", "yb_post_1961", "crawl", "slab",
+  "ln_garagespaces", "fireplace", "hot_water", "elec_baseboard", "wall", "central_air",
+  ecfs_col, "near_downtown_1mi", "near_downtown_5mi"
+)
+
+formula_ln_tasp_g1 <- reformulate(tasprhs_g1, response = "ln_tasp_re")
+
+mod_tasp1 <- codf$backward_p(formula_ln_tasp_g1, data = dfa, p_out = 0.10, verbose = TRUE)
+
+dfa <- dfa %>%
+  mutate(
+    pre_3 = predict(mod_tasp1, newdata = dfa), esp3  = exp(pre_3), ratio3 = esp3 / tasp_re
+  )
+
+rrmetrics <- codf$ratio_metrics(dfa, esp3, saleprice)
+
+knitr::kable(
+  rrmetrics,  format   = "latex",  booktabs = TRUE,
+  caption  = "Citywide LN\\_TASP Model I Assessing Coefficients + Geo" 
+) %>%  kable_styling(latex_options = c("HOLD_position", "striped"), font_size = 8)
+
+
+altrhs_g1 <- c(
+  "ln_landratio", "lnsbldsfint", "arterial",
+  "single_family1story", "half_duplex1story", "half_duplex2story",
+  "smallest", "small", "large", "largest", "two_plus_baths", "powder_room",
+  "good", "fair", "poor", "very_poor_unsound", "qabove_avg", "qbelow_avg",
+  "yb_pre_1929", "yb_1946_to_1960", "yb_post_1961", "crawl", "slab", "garage", "fireplace",
+  "hot_water", "elec_baseboard", "wall", "central_air", ecfs_col, "near_downtown_1mi", "near_downtown_5mi"
+)
+
+formula_alt_g1 <- reformulate(altrhs_g1, response = "ln_tasp_re")
+
+mod_tasp2 <- codf$backward_p(formula_alt_g1, data = dfa, p_out = 0.10, verbose = TRUE)
+
+dfa <- dfa %>%
+  mutate(
+    pre_4 = predict(mod_tasp2, newdata = dfa), esp4 = exp(pre_4), ratio4 = esp4 / tasp_re
+  )
+
+rrmetrics <- codf$ratio_metrics(dfa, esp4, saleprice)
+
+knitr::kable(
+  rrmetrics,  format   = "latex",  booktabs = TRUE,
+  caption  = "Citywide LN\\_TASP Model II Assessing Coefficients + Geo" 
+) %>%  kable_styling(latex_options = c("HOLD_position", "striped"), font_size = 8)
+```
+
+```{r mod4geonot}
+tasprhs <- c(
+  "ln_landratio", "ln_base_bldgsize_ratio", "arterial",
+  "single_family1story", "half_duplex1story", "half_duplex2story",
+  "smallest", "small", "large", "largest", "two_plus_baths", "powder_room",
+  "good", "fair", "poor", "very_poor_unsound", "qabove_avg", "qbelow_avg",
+  "yb_pre_1929", "yb_1946_to_1960", "yb_post_1961", "crawl", "slab",
+  "ln_garagespaces", "fireplace", "hot_water", "elec_baseboard", "wall", "central_air", ecfs_col
+)
+
+formula_ln_tasp <- reformulate(tasprhs, response = "ln_tasp_re")
+
+mod_tasp12 <- codf$backward_p(formula_ln_tasp, data = dfa2, p_out = 0.10, verbose = TRUE)
+
+dfa2 <- dfa2 %>%
+  mutate(
+    pre_3 = predict(mod_tasp12, newdata = dfa2), esp3  = exp(pre_3), ratio3 = esp3 / tasp_re
+  )
+
+rrmetrics <- codf$ratio_metrics(dfa2, esp3, saleprice)
+
+knitr::kable(
+  rrmetrics,  format   = "latex",  booktabs = TRUE,
+  caption  = "Citywide LN\\_TASP Model I Assessing Coefficients" 
+) %>%  kable_styling(latex_options = c("HOLD_position", "striped"), font_size = 8)
+
+
+altrhs <- c(
+  "ln_landratio", "lnsbldsfint", "arterial",
+  "single_family1story", "half_duplex1story", "half_duplex2story",
+  "smallest", "small", "large", "largest", "two_plus_baths", "powder_room",
+  "good", "fair", "poor", "very_poor_unsound", "qabove_avg", "qbelow_avg",
+  "yb_pre_1929", "yb_1946_to_1960", "yb_post_1961", "crawl", "slab", "garage", "fireplace",
+  "hot_water", "elec_baseboard", "wall", "central_air", ecfs_col
+)
+
+formula_alt <- reformulate(altrhs, response = "ln_tasp_re")
+
+mod_tasp22 <- codf$backward_p(formula_alt, data = dfa2, p_out = 0.10, verbose = TRUE)
+
+dfa2 <- dfa2 %>%
+  mutate(
+    pre_4 = predict(mod_tasp22, newdata = dfa2), esp4 = exp(pre_4), ratio4 = esp4 / tasp_re
+  )
+
+rrmetrics <- codf$ratio_metrics(dfa2, esp4, saleprice)
+
+knitr::kable(
+  rrmetrics,  format   = "latex",  booktabs = TRUE,
+  caption  = "Citywide LN\\_TASP Model II Assessing Coefficients" 
+) %>%  kable_styling(latex_options = c("HOLD_position", "striped"), font_size = 8)
+```
+
+```{r mod42}
+tasprhs_g2 <- c(
+  "ln_landratio", "ln_base_bldgsize_ratio", "arterial",
+  "single_family1story", "half_duplex1story", "half_duplex2story",
+  "smallest", "small", "large", "largest", "two_plus_baths", "powder_room", "totalbath",
+  "good", "fair", "poor", "very_poor_unsound", "cavg", "qabove_avg", "qbelow_avg", "qavg",
+  "yb_pre_1929", "yb_1946_to_1960", "yb_post_1961", "crawl", "slab",
+  "ln_garagespaces", "fireplace", "hot_water", "elec_baseboard", "wall", "central_air",
+  ecfs_col, "near_downtown_1mi", "near_downtown_5mi", "near_downtown_10mi"
+)
+
+formula_ln_tasp_g2 <- reformulate(tasprhs_g2, response = "ln_tasp_re")
+
+mod_tasp13 <- codf$backward_p(formula_ln_tasp_g2, data = dfa3, p_out = 0.10, verbose = TRUE)
+
+dfa3 <- dfa3 %>%
+  mutate(
+    pre_3 = predict(mod_tasp13, newdata = dfa3), esp3  = exp(pre_3), ratio3 = esp3 / tasp_re
+  )
+
+rrmetrics <- codf$ratio_metrics(dfa3, esp3, saleprice)
+
+knitr::kable(
+  rrmetrics,  format   = "latex",  booktabs = TRUE,
+  caption  = "Citywide LN\\_TASP Model I Assessing Coefficients + Geo + Averages" 
+) %>%  kable_styling(latex_options = c("HOLD_position", "striped"), font_size = 8)
+
+altrhs_g2 <- c(
+  "ln_landratio", "lnsbldsfint", "arterial",
+  "single_family1story", "half_duplex1story", "half_duplex2story",
+  "smallest", "small", "large", "largest", "two_plus_baths", "powder_room",
+  "good", "fair", "poor", "very_poor_unsound", "qabove_avg", "qbelow_avg",
+  "yb_pre_1929", "yb_1946_to_1960", "yb_post_1961", "crawl", "slab", "garage", "fireplace",
+  "hot_water", "elec_baseboard", "wall", "central_air", ecfs_col, "near_downtown_1mi",
+  "near_downtown_5mi", "near_downtown_10mi", "qavg", "totalbath", "cavg"
+)
+
+formula_alt_g2 <- reformulate(altrhs_g2, response = "ln_tasp_re")
+
+mod_tasp23 <- codf$backward_p(formula_alt_g2, data = dfa3, p_out = 0.10, verbose = TRUE)
+
+dfa3 <- dfa3 %>%
+  mutate(
+    pre_4 = predict(mod_tasp23, newdata = dfa3), esp4 = exp(pre_4), ratio4 = esp4 / tasp_re
+  )
+
+rrmetrics <- codf$ratio_metrics(dfa3, esp4, saleprice)
+
+knitr::kable(
+  rrmetrics,  format   = "latex",  booktabs = TRUE,
+  caption  = "Citywide LN\\_TASP Model II Assessing Coefficients + Geo + Averages" 
+) %>%  kable_styling(latex_options = c("HOLD_position", "striped"), font_size = 8)
+```
+
+```{r mod4geonot2}
+tasprhs_2 <- c(
+  "ln_landratio", "ln_base_bldgsize_ratio", "arterial",
+  "single_family1story", "half_duplex1story", "half_duplex2story",
+  "smallest", "small", "large", "largest", "two_plus_baths", "powder_room",
+  "good", "fair", "poor", "very_poor_unsound", "qabove_avg", "qbelow_avg",
+  "yb_pre_1929", "yb_1946_to_1960", "yb_post_1961", "crawl", "slab",
+  "ln_garagespaces", "fireplace", "hot_water", "elec_baseboard", "wall", "central_air", ecfs_col,
+  "qavg", "totalbath", "cavg"
+)
+
+formula_ln_tasp_2 <- reformulate(tasprhs_2, response = "ln_tasp_re")
+
+mod_tasp14 <- codf$backward_p(formula_ln_tasp_2, data = dfa4, p_out = 0.10, verbose = TRUE)
+
+dfa4 <- dfa4 %>%
+  mutate(
+    pre_3 = predict(mod_tasp14, newdata = dfa4), esp3  = exp(pre_3), ratio3 = esp3 / tasp_re
+  )
+
+rrmetrics <- codf$ratio_metrics(dfa4, esp3, saleprice)
+
+knitr::kable(
+  rrmetrics,  format   = "latex",  booktabs = TRUE,
+  caption  = "Citywide LN\\_TASP Model I Assessing Coefficients + Averages" 
+) %>%  kable_styling(latex_options = c("HOLD_position", "striped"), font_size = 8)
+
+altrhs_2 <- c(
+  "ln_landratio", "lnsbldsfint", "arterial",
+  "single_family1story", "half_duplex1story", "half_duplex2story",
+  "smallest", "small", "large", "largest", "two_plus_baths", "powder_room",
+  "good", "fair", "poor", "very_poor_unsound", "qabove_avg", "qbelow_avg",
+  "yb_pre_1929", "yb_1946_to_1960", "yb_post_1961", "crawl", "slab", "garage", "fireplace",
+  "hot_water", "elec_baseboard", "wall", "central_air", ecfs_col, "qavg", "totalbath", "cavg"
+)
+
+formula_alt_2 <- reformulate(altrhs_2, response = "ln_tasp_re")
+
+mod_tasp24 <- codf$backward_p(formula_alt_2, data = dfa4, p_out = 0.10, verbose = TRUE)
+
+dfa4 <- dfa4 %>%
+  mutate(
+    pre_4 = predict(mod_tasp24, newdata = dfa4), esp4 = exp(pre_4), ratio4 = esp4 / tasp_re
+  )
+
+rrmetrics <- codf$ratio_metrics(dfa4, esp4, saleprice)
+
+knitr::kable(
+  rrmetrics,  format   = "latex",  booktabs = TRUE,
+  caption  = "Citywide LN\\_TASP Model II Assessing Coefficients  + Averages" 
+) %>%  kable_styling(latex_options = c("HOLD_position", "striped"), font_size = 8)
+```
+
+```{r mod4a, results='asis'}
+codf$model_metrics_A(mod_tasp1, "Citywide LN\\_TASP Model I Fit Statistics + Geo")
+codf$coef_table(mod_tasp1, "Citywide LN\\_TASP Model I Coefficients (95% CI) + Geo")
+```
+
+```{r mod4agn, results='asis'}
+codf$model_metrics_A(mod_tasp12, "Citywide LN\\_TASP Model I Fit Statistics")
+codf$coef_table(mod_tasp12, "Citywide LN\\_TASP Model I Coefficients (95% CI)")
+```
+
+```{r mod4b, results='asis'}
+codf$model_metrics_A(mod_tasp2, "Citywide LN\\_TASP Model II Fit Statistics + Geo")
+codf$coef_table(mod_tasp2, "Citywide LN\\_TASP Model II Coefficients (95% CI) + Geo")
+```
+
+```{r mod4bgn, results='asis'}
+codf$model_metrics_A(mod_tasp22, "Citywide LN\\_TASP Model II Fit Statistics")
+codf$coef_table(mod_tasp22, "Citywide LN\\_TASP Model II Coefficients (95% CI)")
+```
+
+```{r mod4a2, results='asis'}
+codf$model_metrics_A(mod_tasp13, "Citywide LN\\_TASP Model I Fit Statistics + Geo + Averages")
+codf$coef_table(mod_tasp13, "Citywide LN\\_TASP Model I Coefficients (95% CI) + Geo + Averages")
+```
+
+```{r mod4agn2, results='asis'}
+codf$model_metrics_A(mod_tasp14, "Citywide LN\\_TASP Model I Fit Statistics + Averages")
+codf$coef_table(mod_tasp14, "Citywide LN\\_TASP Model I Coefficients (95% CI) + Averages")
+```
+
+```{r mod4b2, results='asis'}
+codf$model_metrics_A(mod_tasp23, "Citywide LN\\_TASP Model II Fit Statistics + Geo + Averages")
+codf$coef_table(mod_tasp23, "Citywide LN\\_TASP Model II Coefficients (95% CI) + Geo + Averages")
+```
+
+```{r mod4bgn2, results='asis'}
+codf$model_metrics_A(mod_tasp24, "Citywide LN\\_TASP Model II Fit Statistics + Averages")
+codf$coef_table(mod_tasp24, "Citywide LN\\_TASP Model II Coefficients (95% CI) + Averages")
+```
+
+
+
+
+
+```{r modsss, eval=FALSE}
+d4_mod_time_23_25 <- mod_time
+d4_mod_ln_price_no_ecf_23_25 <- mod_ln_price_no_ecf
+d4_mod_base_23_25 <- mod_base
+d4_mod_base_inliers_23_25 <- mod_base_inliers
+d4_mod_tasp1_23_25 <- mod_tasp1
+d4_mod_tasp2_23_25 <- mod_tasp2
+
+codf$save_model_bundle(
+  model_names = c("d4_mod_time_23_25", "d4_mod_ln_price_no_ecf_23_25", "d4_mod_base_23_25",
+                  "d4_mod_base_inliers_23_25", "d4_mod_tasp1_23_25", "d4_mod_tasp2_23_25"),
+  bundle_path = here("models/codmods/districtmods", "cod_district-4_23-25_31Mar.rds"),
+  manifest_csv_path = here("models/codmods/districtmods", "cod_district-4_23-25_31Mar_manifest.csv")
+)
+```
+
+```{r modsav, eval=FALSE}
+d4_mod_time_23_25geo_July22 <- mod_time
+d4_mod_ln_price_no_ecf_23_25geo_July22 <- mod_ln_price_no_ecf
+d4_mod_base_23_25geo_July22 <- mod_base
+d4_mod_base_inliers_23_25geo_July22 <- mod_base_inliers
+d4_mod_tasp_23_25geo_July22 <- mod_tasp1
+d4_mod_alt_23_25geo_July22 <- mod_tasp2
+df4 <- df
+
+save(d4_mod_time_23_25geo_July22, d4_mod_ln_price_no_ecf_23_25geo_July22,
+     d4_mod_base_23_25geo_July22, d4_mod_base_inliers_23_25geo_July22,
+     d4_mod_tasp_23_25geo_July22, d4_mod_alt_23_25geo_July22, df4,
+     file = here("rmds/cod2325/districtruns/dmods", "spss_cod_district-4_23-25geo_July22.RData"))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

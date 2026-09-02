@@ -1,5 +1,9 @@
 # Automated Valuation Model Development for the City of Detroit
 
+<div align="center">
+  <img src="notes/items/det_logo_assessors_1.png" alt="Office of the Assessor Logo">
+</div>
+
 This repository contains code and supporting materials for building, validating, and comparing automated valuation models (AVMs) for residential property assessment in Detroit, Michigan.
 
 The project has two closely related goals:
@@ -18,16 +22,11 @@ The analysis compares **five model specifications across seven city council dist
 The project also explores broader AVM development workflows, including:
 
 - data cleaning and feature engineering
-- linear regression
-- backward variable selection
+- linear regression (with backward variable selection) 
 - nonlinear modeling with generalized additive models (GAMs)
 - machine-learning approaches
 - geospatial accessibility features
 - time-adjustment variables
-- model-fit diagnostics
-- assessment ratio studies
-- SPSS-vs-R coefficient concordance
-- district-level model comparison and visualization
 
 ---
 
@@ -39,9 +38,7 @@ A major objective is to determine whether existing SPSS regression workflows can
 
 - coefficients
 - fitted values
-- R
-- R²
-- adjusted R²
+- R / R² / adjusted R²
 - standard error of estimate (SEE)
 - F statistics
 - residual degrees of freedom
@@ -49,22 +46,14 @@ A major objective is to determine whether existing SPSS regression workflows can
 
 ### 2. Evaluate AVM Performance
 
-Model performance is assessed using both conventional predictive metrics and mass-appraisal diagnostics.
+Model performance is assessed using both conventional predictive metrics and mass-appraisal diagnostics:
 
-Common model-fit measures include:
-
-- R²
-- adjusted R²
+- R² / adjusted R²
 - SEE
 - RMSE
 - MAE
 - F statistic
-
-Ratio-study measures include:
-
-- median ratio
-- mean ratio
-- weighted mean ratio
+- median ratio / mean ratio / weighted mean ratio
 - coefficient of dispersion (COD)
 - price-related differential (PRD)
 - price-related bias (PRB)
@@ -95,13 +84,8 @@ Traditional multiple linear regression provides the primary benchmark and suppor
 
 ```r
 model <- lm(
-  ln_price ~ ln_landratio +
-    ln_base_bldgsize_ratio +
-    condition +
-    quality +
-    central_air +
-    fireplace,
-  data = sales
+  ln_price ~ ln_landratio + ln_base_bldgsize_ratio + condition + quality + central_air + fireplace,
+    data = sales
 )
 ```
 
@@ -115,14 +99,9 @@ Generalized additive models are used to investigate nonlinear relationships that
 library(mgcv)
 
 gam_model <- gam(
-  ln_price ~
-    s(building_area, bs = "cs") +
-    s(age, bs = "cs") +
-    s(distance_to_downtown, bs = "cs") +
-    condition +
-    quality,
-  data = sales,
-  method = "REML"
+  ln_price ~ s(building_area, bs = "cs") + s(age, bs = "cs") + s(distance_to_downtown, bs = "cs") + condition + quality,
+    data = sales,
+    method = "REML"
 )
 ```
 
@@ -143,9 +122,7 @@ Because predictive accuracy alone is not sufficient for assessment modeling, mac
 
 ## Geospatial Features
 
-Location is an important component of residential property value.
-
-The project includes workflows for calculating:
+Location is an important component of residential property value. The project includes workflows for calculating:
 
 ### Straight-Line Distance
 
@@ -162,7 +139,7 @@ A local GraphHopper routing server can be used to calculate network-based access
 
 Examples include distance or travel time to:
 
-- downtown / CBD
+- downtown / Central Business District (CBD)
 - hospitals
 - parks
 - schools and universities
@@ -176,61 +153,15 @@ Examples include distance or travel time to:
 
 ---
 
-## SPSS vs R Validation
-
-For each paired model, the project compares SPSS and R output directly.
-
-### Metric Comparison
-
-Results can be summarized using tables or heatmaps showing whether R is:
-
-- stronger than SPSS
-- approximately equivalent
-- weaker than SPSS
-
-Metric direction is handled explicitly. For example:
-
-- higher R² is better
-- lower RMSE / SEE / MAE is better
-- lower COD is generally better
-- median ratio and PRD are evaluated relative to a target near 1.00
-- PRB is evaluated relative to a target near 0.00
-
-### Coefficient Concordance
-
-A coefficient-concordance plot compares:
-
-- **x-axis:** SPSS unstandardized coefficient
-- **y-axis:** R coefficient
-
-A 1:1 reference line indicates perfect agreement.
-
-```r
-ggplot(coef_compare, aes(x = spss_coef, y = r_coef)) +
-  geom_abline(
-    intercept = 0,
-    slope = 1,
-    linetype = "dashed"
-  ) +
-  geom_point(alpha = 0.6) +
-  coord_equal()
-```
-
-Because intercepts and other large coefficients can compress smaller coefficients visually, concordance plots may also be split into separate coefficient ranges.
-
----
-
 ## Assessment Ratio Analysis
 
-Assessment-quality diagnostics are calculated from predicted-to-observed ratios.
-
-For a parcel i:
+Assessment-quality diagnostics are calculated from predicted-to-observed ratios. For a parcel i:
 
 ```text
 Ratio_i = Predicted_i / Observed_i
 ```
 
-The project calculates several commonly used mass-appraisal statistics.
+The project calculates several commonly used mass-appraisal statistics:
 
 ### Median Ratio
 
@@ -258,15 +189,11 @@ abs(ratio - 1) <= 0.20
 abs(ratio - 1) <= 0.50
 ```
 
-These are useful supplemental measures of prediction concentration, although they should not be interpreted as substitutes for formal ratio-study metrics.
-
 ---
 
 ## Reproducibility
 
-This project is developed primarily in R.
-
-Recommended setup:
+This project is developed primarily in R. Recommended setup:
 
 ```r
 install.packages("renv")
@@ -279,34 +206,19 @@ Using an RStudio Project (`.Rproj`) together with the `here` package is recommen
 library(here)
 
 sales <- readr::read_csv(
-  here("data", "processed", "sales.csv")
+  here("data/city", "SF-Sales-Apr2021-Mar2026-08182026.csv")
 )
-```
-
-Avoid hard-coded machine-specific paths such as:
-
-```r
-"C:/Users/name/Documents/project/data/sales.csv"
 ```
 
 ---
 
 ## Key R Packages
 
-Packages used across the project may include:
+The linked document lists packages used across the project.
 
-```text
-tidyverse
-sf
-mgcv
-gratia
-xgboost
-lightgbm
-tidymodels
-kableExtra
-here
-renv
-```
+<div>
+  <a href="notes/rlib_functions_by_package.pdf">R Libraries and Relevant Functions</a>
+</div>
 
 Additional packages may be required by individual scripts.
 
@@ -316,7 +228,7 @@ Additional packages may be required by individual scripts.
 
 Some spatial features rely on a locally hosted GraphHopper routing server.
 
-A typical workflow is:
+A typical workflow:
 
 1. Download an OpenStreetMap `.osm.pbf` extract
 2. Configure a GraphHopper routing profile
@@ -324,8 +236,6 @@ A typical workflow is:
 4. Start the local GraphHopper server
 5. Send routing requests from R
 6. Store calculated network distances / travel times as AVM predictors
-
-Large GraphHopper graph files and OpenStreetMap extracts should generally **not** be committed to the repository.
 
 ---
 
@@ -368,31 +278,17 @@ Current work includes:
 
 ---
 
-## Contributions
-
-Issues, suggestions, and methodological discussion are welcome.
-
-For contributions involving model comparisons, please include enough information to reproduce the result, including:
-
-- R version
-- package versions
-- model specification
-- preprocessing steps
-- relevant data assumptions
-
----
-
-## License
-
-GNU General Public License v3.0
-
----
-
 ## Acknowledgments
 
 This project makes use of open-source R packages and, where applicable, OpenStreetMap-derived geographic data and GraphHopper routing tools.
 
 The residential AVM development team is part of the GIS/Data Analysis section of the Office of the Assessor, within the Office of the Chief Financial Officer of the City of Detroit. Please contact Elliot Dean (Elliot.Dean@detroitmi.gov) with any questions or comments.
+
+---
+
+### License
+
+GNU General Public License v3.0
 
 ---
 

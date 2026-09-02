@@ -1,0 +1,268 @@
+---
+title: "City of Detroit 2023-2025 Sales NLM"
+author: |
+  | Elliot Dean - Program Analyst IV  
+  | Office of the Chief Financial Officer | Office of the Assessor
+  | City of Detroit
+date: "`r sub('^0', '', format(Sys.Date(), '%d %B %Y'))`"
+geometry: margin = 1.5cm
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: false
+mainfont: Arial
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, error = FALSE, echo = FALSE)
+```
+
+```{r lib_load}
+library(tidyverse)   # data wrangling & ggplot2
+library(janitor)     # functions for examining and cleaning dirty data
+library(kableExtra)  # simple table generator
+library(here)        # Find files within a project
+library(haven)       # work with spss files
+library(olsrr)       # package for p-value backward elimination
+library(broom)       # summarizes key information about models
+library(rlang)       # functions for Base Types and Core R and 'Tidyverse' Features
+library(car)         # VIF, influence measures helpers
+library(scales)      # provides the internal scaling infrastructure used by ggplot
+library(mgcv)        # Mixed GAM Computation Vehicle
+library(gratia)      # ggplot’based graphics + utility functions for working with GAMs
+```
+
+---
+
+```{r fun}
+load(file = here("rmds/modfunctions", "modfunctions10d.RData"))
+```
+
+Functions used: modfunctions_notes.R
+
+```{r dataload}
+load(file = here("data/rdata", "CODsalesSFapr2023Mar2025.RData"))
+```
+
+Data file: CODsalesSFapr2023toMarch2025Updated.RData (salesSFapr2023toMarch2025Updated.csv)
+
+```{r mod1}
+formula_time <- ln_sppsf ~ arterial + single_family1story + half_duplex1story + half_duplex2story +
+  smallest + small + large + largest + two_plus_baths + powder_room +
+  good + fair + poor + very_poor_unsound + qabove_avg + qbelow_avg +
+  s(sresb_yearbuilt, bs = "cs", k = 10) + crawl + slab + s(ln_garagespaces, bs = "cs", k = 4) +
+  fireplace + hot_water + elec_baseboard + wall + central_air + s(months, bs = "cs", k = 10)
+
+mod_time <- gam(
+  formula_time, data = df, method = "REML", select = TRUE # adds an extra penalty to the null space of the basis
+  #                            method = "GCV.Cp" , select = FALSE                                
+)
+
+#summary(mod_time)
+```
+
+```{r mod1m, results='asis'}
+model_metrics_A(mod_time, "LN\\_SPPSF model fit statistics")
+gct1 <- gam_coef_table(mod_time, "LN\\_SPPSF model coefficients (95% CI)", format = "latex")
+gct1$kable
+```
+
+---
+
+```{r mod2}
+formula_ln_price_no_ecf <- ln_price ~
+  s(ln_landratio, bs = "cs", k = 10) + s(ln_base_bldgsize_ratio, bs = "cs", k = 10) +
+  arterial + single_family1story + half_duplex1story + half_duplex2story +
+  smallest + small + large + largest + two_plus_baths + powder_room +
+  good + fair + poor + very_poor_unsound + qabove_avg + qbelow_avg +
+  s(sresb_yearbuilt, bs = "cs", k = 10) + crawl + slab + s(ln_garagespaces, bs = "cs", k = 4) +
+  fireplace + hot_water + elec_baseboard + wall + central_air + s(months, bs = "cs", k = 10)
+
+mod_ln_price_no_ecf <- gam(formula_ln_price_no_ecf, data = df, method = "REML", select = TRUE)
+
+#summary(mod_ln_price_no_ecf)
+```
+
+```{r mod2m, results='asis'}
+model_metrics_A(mod_ln_price_no_ecf, "LN\\_PRICE (No ECFs) model fit statistics")
+gct2 <- gam_coef_table(mod_ln_price_no_ecf, "LN\\_PRICE (No ECFs) model coefficients (95% CI)", format = "latex")
+gct2$kable
+```
+
+---
+
+```{r mod3}
+formula_base <- ln_price ~
+  s(ln_landratio, bs = "cs", k = 10) + s(ln_base_bldgsize_ratio, bs = "cs", k = 10) + arterial +
+  single_family1story + half_duplex1story + half_duplex2story + smallest + small + large + largest +
+  two_plus_baths + powder_room + good + fair + poor + very_poor_unsound +
+  qabove_avg + qbelow_avg + s(sresb_yearbuilt, bs = "cs", k = 10) + crawl + slab +
+  s(ln_garagespaces, bs = "cs", k = 4) +
+  fireplace + hot_water + elec_baseboard + wall + central_air + s(months, bs = "cs", k = 10) + ecf
+
+mod_base <- gam(formula_base, data = df, method = "REML", select = TRUE)
+
+#summary(mod_base)
+```
+
+```{r mod3m, results='asis'}
+model_metrics_A(mod_base, "LN\\_PRICE (+ ECFs) model fit statistics")
+gct3 <- gam_coef_table(mod_base, "LN\\_PRICE (+ ECFs) model coefficients (95% CI)", format = "latex")
+gct3$kable
+```
+
+---
+
+```{r mod4}
+formula_ln_tasp <- ln_tasp_re ~
+  s(ln_landratio, bs = "cs", k = 10) + s(ln_base_bldgsize_ratio, bs = "cs", k = 10) + arterial +
+  single_family1story + half_duplex1story + half_duplex2story +
+  smallest + small + large + largest + two_plus_baths + powder_room +
+  good + fair + poor + very_poor_unsound + qabove_avg + qbelow_avg +
+  s(sresb_yearbuilt, bs = "cs", k = 10) + crawl + slab + s(ln_garagespaces, bs = "cs", k = 4) +
+  fireplace + hot_water + elec_baseboard + wall + central_air + ecf + # s(ecf, bs = "re") +
+  s(months, bs = "cs", k = 10)
+
+mod_tasp <- gam(formula_ln_tasp, data = dfa, method = "REML", select = TRUE)
+
+#summary(mod_tasp)
+```
+
+```{r mod4m, results='asis'}
+model_metrics_A(mod_tasp, "LN\\_TASP model fit statistics")
+gct4 <- gam_coef_table(mod_tasp, "LN\\_TASP model coefficients (95% CI)", format = "latex")
+gct4$kable
+```
+
+---
+
+```{r mod5}
+formula_alt <- ln_tasp_re ~
+  s(ln_landratio, bs = "cs", k = 10) +  s(lnsbldsfint, bs = "cs", k = 10) +  arterial +
+  single_family1story + half_duplex1story + half_duplex2story +
+  smallest + small + large + largest +  two_plus_baths + powder_room +
+  good + fair + poor + very_poor_unsound +  qabove_avg + qbelow_avg +
+  s(sresb_yearbuilt, bs = "cs", k = 10) +  crawl + slab +  garage + fireplace +
+  hot_water + elec_baseboard + wall + central_air + ecf + #  s(ecf, bs = "re") +
+  s(months, bs = "cs", k = 10)
+
+mod_alt <- gam(formula_alt, data = dfa, method = "REML", select = TRUE)
+
+#summary(mod_alt)
+```
+
+```{r mod5m, results='asis'}
+model_metrics_A(mod_alt, "Alternative LN\\_TASP model fit statistics")
+gct5 <- gam_coef_table(mod_base, "Alternative LN\\_TASP model coefficients (95% CI)", format = "latex")
+gct5$kable
+```
+
+---
+
+```{r mod6}
+formula_alt2 <- ln_tasp_re ~
+  s(ln_landratio, bs = "cs", k = 10) +  s(lnsbldsfint, bs = "cs", k = 10) +  arterial +
+  single_family1story + half_duplex1story + half_duplex2story +
+  smallest + small + large + largest +  two_plus_baths + powder_room +
+  good + fair + poor + very_poor_unsound +  qabove_avg + qbelow_avg +
+  s(sresb_yearbuilt, bs = "cs", k = 10) +  crawl + slab +  garage + fireplace +
+  hot_water + elec_baseboard + wall + central_air + ecf
+
+mod_alt2 <- gam(formula_alt2, data = dfa, method = "REML", select = TRUE)
+
+#summary(mod_alt2)
+```
+
+```{r mod6m, results='asis'}
+model_metrics_A(mod_alt2, "Alternative LN\\_TASP (no sale month) model fit statistics")
+gct6 <- gam_coef_table(mod_alt2, "Alternative LN\\_TASP (no sale month) model coefficients (95% CI)", format = "latex")
+gct6$kable
+```
+
+---
+
+```{r diag}
+model_names = c("mod_time", "mod_ln_price_no_ecf", "mod_base", "mod_tasp", "mod_alt", "mod_alt2")
+
+for (nm in model_names) {
+  mod <- get(nm, envir = .GlobalEnv)
+  ct <- tryCatch(broom::tidy(mod), error = function(e) NULL)
+  cat(nm, "-> tidy rows:", if (is.null(ct)) "ERROR" else nrow(ct), "\n")
+}
+```
+
+
+```{r modsave, eval=FALSE}
+cod_nlmod_time_23_25 <- mod_time
+cod_nlmod_ln_price_no_ecf_23_25 <- mod_ln_price_no_ecf
+cod_nlmod_base_23_25 <- mod_base
+cod_nlmod_tasp_23_25 <- mod_tasp
+cod_nlmod_alt_23_25 <- mod_alt
+cod_nlmod_alt2_23_25 <- mod_alt2
+
+save_model_bundle(
+  model_names = c("cod_nlmod_time_23_25", "cod_nlmod_ln_price_no_ecf_23_25", "cod_nlmod_base_23_25",
+                  "cod_nlmod_tasp_23_25", "cod_nlmod_alt_23_25", "cod_nlmod_alt2_23_25"),
+  bundle_path = here("models/codmods", "CODsalesSFapr2023toMarch2025Updated_NLM_18Feb.rds"),
+  manifest_csv_path = here("models/codmods", "CODsalesSFapr2023toMarch2025Updated_NLM_18Feb_manifest.csv")
+)
+```
+
+```{r modelload, eval=FALSE}
+bundle <- readRDS(here("models/codmods", "CODsalesSFapr2023toMarch2025Updated_NLM_11Feb.rds"))
+names(bundle$models)
+```
+
+```{r}
+df2 <- df %>%
+  dplyr::mutate(
+    ln_garagespaces = log1p(garagespaces)  # safe for 0
+  )
+ndt <- newdata_from_sale(data = df2, formula = formula_ln_tasp, sale_id = 4782482, sale_col = "saleid")
+predt <- predict(mod_tasp, newdata = ndt)
+predt
+```
+
+```{r}
+nrow(ndt)
+ndt %>% dplyr::select(saleid, dplyr::everything()) %>% dplyr::glimpse()
+
+mf <- model.frame(mod_tasp)
+train_levels <- levels(mf$ecf)
+
+unique_new <- setdiff(unique(as.character(ndt$ecf)), train_levels)
+unique_new
+
+
+```
+
+
+```{r}
+mf <- model.frame(mod_tasp)
+train_levels <- levels(mf$ecf)
+
+# Is the troublesome ECF absent in training?
+"5R524" %in% train_levels
+all_levels <- sort(unique(as.character(df$ecf)))
+setdiff(all_levels, train_levels)[1:50]   # show some levels present in df but absent in training
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,946 @@
+---
+title: "Model Trial II"
+author: "Elliot Dean"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  warning = FALSE,
+  message = FALSE,
+  error   = FALSE
+)
+```
+
+### Introduction
+
+This is an initial test to integrate sales and property data from the .
+
+------------------------------------------------------------------------
+
+## Libraries
+update.packages(ask = FALSE, checkBuilt = TRUE)
+
+library(tidyverse) ;library(data.table) ; library(magrittr) ; library(janitor)  
+*library(reticulate) ; *library(DBI) ; *library(odbc) ; *library(sf)
+install.packages(c('tidyverse', 'caret', 'broom', 'car', 'lmtest', 'ggpubr', 'ggpmisc'))
+install.packages(c('reticulate', 'DBI', 'odbc', 'sf', 'corrplot', 'httr', 'vip', 'here'))
+install.packages(c("finetune", "DiceKriging", "rgenoud", 'leaps', 'nlstools', 'conflicted'))
+install.packages("gtsummary", 'ggrepel', 'ggpp')
+
+### Load Necessary Libraries
+
+```{r lib_load}
+library(tidyverse)   # data wrangling & ggplot2
+library(magrittr)
+library(janitor)
+library(caret)       # train/test split, cross‐validation
+library(broom)       # tidy model output
+library(car)         # VIF, Durbin‐Watson
+library(lmtest)      # Breusch–Pagan test
+# library(data.table)
+# library(reticulate)
+```
+
+### Importing and Organizing Data
+
+Option 1, data.table, for larger sets, but I started with tidyverse below.
+
+```{r, eval = FALSE}
+# Import Parcel AND Sales Data using the fread function from the data.table package
+
+parcelDatas <- fread('data/det_pars.csv')
+salesDatas  <- fread('data/sales_det.csv')
+```
+
+START HERE:
+
+```{r data_import}
+# Import Parcel AND Sales Data using read_csv from readr package (Tidyverse)
+# The clean_names method from janitor is used to standardized column names
+parcels <- read_csv('data/ResiBldgData25.csv')  |> 
+  clean_names()
+sales   <- read_csv('data/SFResiSalesJUN2022-MAY2024_w-Exterior1.csv') |> 
+  clean_names()
+```
+
+Input data (csv or otherwise) imported into RStudio can be saved as R objects for faster retrieval and streamlined workflow / organization:
+
+```{r save_input, eval = FALSE}
+# The save function is included in base R
+# save(parcels, sales, file = 'data/spss_data.RData')
+load('data/spss_data.RData')
+```
+
+The data contained in R objects can be retrieved with the load function:
+load('data/spss_data.RData')
+
+The data tables will be merged on Parcel Number (parcelno):
+
+```{r data_merge}
+df <- merge(sales, parcels, by = 'parcelno')
+```
+
+Remove duplicate entries (delete rows where parcel number appears twice or more):
+
+```{r sel_distinct}
+# Using distinct function, parcel column
+# Created new dataframe (ddf) to maintain original
+ddf <- df |> 
+  distinct(parcelno, .keep_all = TRUE)
+```
+
+Make council district categorical for parameter testing:
+
+```{r categorize}
+ddf$cds <- as.character(ddf$s_council)
+```
+
+Drop duplicate columns (s_resb_garagearea, s_resb_floorarea, etc.):
+
+```{r drop_dupes}
+ddf <-
+  subset(ddf, select = -c(s_resb_garagearea, s_resb_crawspace, s_resb_fullbaths,
+                         s_resb_basementarea, s_resb_groundarea, s_resb_halfbaths,
+                         s_resb_floorarea, s_resb_slabarea, s_resb_heat, s_cond,
+                         s_resb_depr, s_aircond, s_esttcv, s_resb_bldgclass,
+                         s_resb_yearbuilt, s_resb_style, s_resb_plusminus,
+                         s_resb_occ))
+```
+
+Create a new column - Coordinates (lat_lon) - which merges X and Y coordinates.
+Adding the Google Maps URL for API allows linking, Google Earth also added:
+
+```{r coordinates}
+ddf <- ddf |>  
+  mutate(  # round to 6 decimals
+    lat      = round(y, 6),
+    lon      = round(x, 6),
+    lat_lon  = paste(lat, lon, sep = ','), # combine into'42.334550,-83.043964'
+    gmap_url = paste0(                     # build the Maps search URL
+      'https://www.google.com/maps/search/?api=1&query=', lat_lon
+    ),
+    ge_url   = paste0(                     # build Google Earth search URL
+      'https://earth.google.com/web/@', lat, ',', lon, ',1000a'
+      # 1000 meters above ground (street-level), no tilt/bearing/etc.
+    )
+  # x = longitude, y = latitude; EPSG:4326 is standard WGS84
+  # df_sf <- st_as_sf(df, coords = c("x", "y"), crs = 4326, remove = FALSE)
+  )
+```
+
+Remove value, build, sqft, floor area outlier(s):
+
+```{r data_filer}
+ddf <- ddf |> 
+  # drop_na() |> 
+  filter(avwhensold < 1000000) |> 
+  filter(yearbuilt > 1920 & yearbuilt < 2026) |> 
+  filter(s_totalsqft < 100000 & s_totalsqft > 0) |>  
+  filter(floorarea > 0) |> 
+  # filter(cds != '22' & cds != '62') |> 
+  filter(s_totalacres > 0)
+```
+
+Correctly format columns (date):
+
+```{r data_form}
+ddf$saledate <- as.Date(ddf$saledate, format = '%m/%d/%Y')
+#ddf$sale_date.y <- sub('\\+00$', '', ddf$sale_date.y)
+#ddf$sale_date.y <- as.Date(ymd_hms(ddf$sale_date.y, tz = 'UTC'))
+```
+
+Check dataframe data types using str function:
+
+```{r check_df, eval = FALSE}
+str(ddf)
+```
+
+As performed previously, merged datasets can also be saved as R objects for faster loading:
+
+```{r save_dfs, eval = FALSE}
+# The save function is included in base R
+save(df, ddf, file = 'data/spss_frames.RData')
+```
+
+Add new columns, for data or organization:
+
+```{r add_cols}
+ddf <- ddf |> 
+  mutate(numbaths = fullbaths + 0.5 * halfbaths)
+```
+
+Drop dupe columns + content
+
+```{r drop_dupe_cols}
+# Suppose df is your data.frame
+# 1) Transpose to get columns as rows
+mat <- t(as.matrix(df))
+
+# 2) Identify duplicated rows (i.e., duplicate columns in original)
+dups <- duplicated(mat)
+
+# 3) Keep only non-duplicates
+df_clean <- df[ , !dups]
+
+# Drop dupe column names
+# df <- df[ , !duplicated(names(df))]
+```
+
+LOAD DFS HERE:
+
+```{r load_dfs, eval = FALSE}
+load('data/spss_frames.RData')
+```
+
+Get some visualizations going
+
+```{r vis1}
+ggplot(
+  data = ddf,
+  mapping = aes(x = yearbuilt, y = avwhensold, color = cds)
+) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  labs(
+    title = "Assessed Value by Build Year",
+    subtitle = "...",
+    x = "Year", y = "Value", color = "Ward"
+  )
+```
+
+```{r vis2}
+ggplot(
+  data = ddf,
+  mapping = aes(x = total_square_footage, y = taxable_value, color = zipc)
+) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  labs(
+    title = "Taxable Value by Square Footage",
+    subtitle = "...",
+    x = "Area", y = "Value", color = "Council District"
+  )
+```
+
+Manipulate data frames further as needed (remove outliers, etc.):
+
+```{r data_filter2}
+ddf2 <- ddf |> 
+  # filter(sale_price.x < 10000000) 
+  filter(year(sale_date.y) > 1950) |> 
+  filter(sale_price.y < 20000000)  |> 
+  filter(year(sale_date.x) > 1950) |> 
+  filter(sale_price.x < 20000000)
+```
+
+```{r vis3}
+ggplot(
+  data = ddf2,
+  mapping = aes(x = sale_price.x, y = sale_price.y, color = zipc)
+) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  labs(
+    title = "Initial Sale Price versus Initial Sale Date",
+    subtitle = "...",
+    x = "Sale Date", y = "Sale Price", color = "Council District"
+  )
+```
+
+Organize dataframe, look at stuff:
+
+```{r plot_n_matrix}
+# Scatterplots of price vs key predictors
+ddf |>
+  select(avwhensold, s_totalsqft, yearbuilt, numbaths, s_resb_nbed, cond) |>
+  gather(key, val, -avwhensold) |>
+  ggplot(aes(val, avwhensold)) +
+    geom_point(alpha = .4) +
+    facet_wrap(~key, scales = "free_x") +
+    labs(x = NULL, y = "Assessed Value When Sold")
+
+# Correlation matrix
+ddf |> 
+  select_if(is.numeric) |>
+  cor(use = "pairwise.complete.obs") |>
+  corrplot::corrplot(method = "ellipse")
+
+```
+
+Split into training & test sets:
+
+```{r sets}
+set.seed(123)
+train_index <- createDataPartition(ddf$avwhensold, p = .7, list = FALSE)
+train_data  <- ddf[train_index, ]
+test_data   <- ddf[-train_index, ]
+```
+
+Fit a linear regression model:
+
+```{r fit_lrm}
+# Baseline: price ~ sqft_living + bedrooms + bathrooms
+model1 <-
+  lm(avwhensold ~ s_totalsqft + yearbuilt + numbaths + s_resb_nbed + cond,
+     data = train_data)
+summary(model1)
+```
+
+To add categorical variables or interactions:
+
+```{r fit_lrm2}
+model2 <- lm(price ~ sqft_living
+                      + bedrooms
+                      + bathrooms
+                      + factor(grade)
+                      + sqft_living:factor(zipcode),
+             data = train_data)
+summary(model2)
+```
+
+Examine model output with broom:
+
+```{r broom}
+# Coefficients & p‐values
+tidy(model1)
+
+# Overall model metrics (R², AIC, BIC)
+glance(model1)
+```
+
+Check regression assumptions:
+
+```{r rega}
+# 1) Residual diagnostics
+par(mfrow = c(2,2))
+plot(model1)
+
+# 2) Multicollinearity
+vif(model1)   # VIF > 5–10 signals trouble
+
+# 3) Heteroskedasticity
+bptest(model1)   # Breusch–Pagan
+
+# 4) Autocorrelation (if data are time-ordered)
+durbinWatsonTest(model1)  
+```
+
+Evaluate on the test set:
+
+```{r eval_ts}
+pred <- predict(model1, newdata = test_data)
+# Compute common metrics
+postResample(pred = pred, obs = test_data$avwhensold)
+#    RMSE    Rsquared      MAE 
+#  123456   0.72         98765 
+```
+
+Cross-validation or regularization:
+
+```{r cval_n_reg}
+ctrl <- trainControl(method = "cv", number = 5)
+lasso_fit <- train(avwhensold ~ ., data = train_data,
+                   method = "glmnet",
+                   trControl = ctrl,
+                   tuneLength = 10)
+lasso_fit
+```
+
+---
+
+## Entire XGBoost Pipeline
+
+```{r libsdatas}
+# 1. Install and load necessary packages
+# Ensure you have the required packages installed.
+# install.packages(c("tidymodels", "AmesHousing", "dplyr", "ggplot2", "xgboost"))
+library(tidymodels)
+library(AmesHousing)
+library(dplyr)
+library(ggplot2)
+
+# 2. Load and Inspect the Data
+# We'll use the AmesHousing dataset, which is conveniently available in a package.
+ames_raw <- make_ames()
+
+# Get a glimpse of the data
+glimpse(ames_raw)
+
+# Summary of the target variable: Sale_Price
+summary(ames_raw$Sale_Price)
+
+# It's often better to predict the log of the sale price to handle skewed data
+# and to penalize underestimates and overestimates more evenly.
+ames_raw <- ames_raw %>%
+  mutate(Sale_Price = log10(Sale_Price))
+```
+
+```{r splitfeats}
+# 3. Initial Data Split
+# We'll split the data into a training set and a testing set.
+# The training set is used for model development and tuning.
+# The testing set is held out until the very end to provide an unbiased
+# estimate of the final model's performance.
+set.seed(123) # for reproducibility
+ames_split <- initial_split(ames_raw, prop = 0.80, strata = Sale_Price)
+
+ames_train <- training(ames_split)
+ames_test <- testing(ames_split)
+
+# 4. Feature Engineering and Preprocessing with Recipes
+# A 'recipe' is a series of steps for data preprocessing. This is one of the
+# most powerful features of tidymodels. We will perform the following steps: 
+# - Convert some integer variables that are actually categorical to factors.
+# - Impute missing values.
+# - Create dummy variables for categorical predictors.
+# - Remove variables with zero variance (no information).
+# - Normalize numeric predictors.
+
+ames_recipe <- recipe(Sale_Price ~ ., data = ames_train) %>%
+  # Impute missing numeric data with the median
+  step_impute_median(all_numeric_predictors()) %>%
+  # Impute missing categorical data with the most frequent value
+  step_impute_mode(all_nominal_predictors()) %>%
+  # Combine infrequent categorical levels into an "other" category. This helps
+  # prevent issues with rare levels that might appear in one data split but not another.
+  step_other(all_nominal_predictors(), threshold = 0.01) %>%
+  # Create dummy variables for all categorical predictors
+  step_dummy(all_nominal_predictors()) %>%
+  # Remove predictors with no variance
+  step_zv(all_predictors()) %>%
+  # Normalize (center and scale) all numeric predictors
+  step_normalize(all_numeric_predictors())
+
+# You can "prep" and "bake" the recipe to see the results of the preprocessing
+# This is an optional step for verification
+prepped_recipe <- prep(ames_recipe, training = ames_train)
+baked_data <- bake(prepped_recipe, new_data = ames_train)
+glimpse(baked_data)
+```
+
+```{r modspecs}
+# 5. Model Specification
+# We'll use an XGBoost model, which is a powerful and popular algorithm for
+# tabular data and often performs very well in these types of regression tasks.
+# We will tune its hyperparameters.
+
+xgb_spec <- boost_tree(
+  trees = 1000,
+  tree_depth = tune(),
+  min_n = tune(),
+  loss_reduction = tune(),
+  sample_size = tune(),
+  mtry = tune(),
+  learn_rate = tune()
+) %>%
+  set_engine("xgboost") %>%
+  set_mode("regression")
+
+# 6. Create a Workflow
+# A workflow bundles the recipe and the model specification together.
+# This makes it much easier to manage the modeling process.
+
+xgb_workflow <- workflow() %>%
+  add_recipe(ames_recipe) %>%
+  add_model(xgb_spec)
+
+# 7. Hyperparameter Tuning
+# We need to find the best combination of hyperparameters for our XGBoost model.
+# We'll use cross-validation and a space-filling design to search the parameter space.
+# Create cross-validation folds from the training data
+set.seed(234)
+ames_folds <- vfold_cv(ames_train, v = 5)
+
+# Define the grid of hyperparameters to search
+# We'll use a space-filling design to explore the parameter space efficiently.
+set.seed(345)
+xgb_grid <- grid_latin_hypercube(
+  tree_depth(),
+  min_n(),
+  loss_reduction(),
+  sample_size = sample_prop(),
+  finalize(mtry(), ames_train),
+  learn_rate(),
+  size = 30 # Number of hyperparameter combinations to try
+)
+
+# Start the tuning process
+# We'll use tune_grid() to apply our workflow to the cross-validation folds
+# and test all the hyperparameter combinations.
+# The `control_grid(save_pred = TRUE)` option saves the predictions for later inspection.
+doParallel::registerDoParallel() # Use parallel processing to speed things up
+
+set.seed(456)
+xgb_tune_res <- tune_grid(
+  xgb_workflow,
+  resamples = ames_folds,
+  grid = xgb_grid,
+  control = control_grid(save_pred = TRUE)
+)
+```
+
+```{r makedamod}
+# 8. Analyze Tuning Results and Finalize the Model
+# Let's see which hyperparameters performed the best.
+
+# Show the best performing models based on root mean squared error (RMSE)
+show_best(xgb_tune_res, metric = "rmse")
+
+# We can also visualize the results
+autoplot(xgb_tune_res)
+
+# Select the best set of hyperparameters
+best_xgb_params <- select_best(xgb_tune_res, metric = "rmse")
+
+# Finalize the workflow by updating it with the best hyperparameters
+final_xgb_workflow <- finalize_workflow(
+  xgb_workflow,
+  best_xgb_params
+)
+
+# 9. Train the Final Model and Evaluate on the Test Set
+# Now, we'll train our final model on the *entire training set* and then
+# evaluate its performance on the *held-out test set*. This gives us an
+# unbiased
+# assessment of how our model is likely to perform on new, unseen data.
+# The `last_fit()` function does this for us: it fits the final model on the
+# full training set and evaluates it on the test set.
+final_fit <- last_fit(final_xgb_workflow, ames_split)
+
+# Collect the metrics from the test set evaluation
+test_set_metrics <- collect_metrics(final_fit)
+print(test_set_metrics)
+
+# Collect the predictions on the test set
+test_set_predictions <- collect_predictions(final_fit)
+print(test_set_predictions)
+
+# Since we predicted the log10 of the price, let's transform it back
+# to the original scale for interpretation.
+test_set_predictions <- test_set_predictions %>%
+  mutate(
+    Sale_Price = 10^Sale_Price,
+    .pred = 10^.pred
+  )
+
+# Visualize the final predictions vs actual values
+ggplot(test_set_predictions, aes(x = Sale_Price, y = .pred)) +
+  geom_point(alpha = 0.5) +
+  geom_abline(color = "red", lty = 2) +
+  labs(
+    title = "Actual vs. Predicted Sale Prices on the Test Set",
+    x = "Actual Sale Price",
+    y = "Predicted Sale Price"
+  ) +
+  scale_x_continuous(labels = scales::dollar_format()) +
+  scale_y_continuous(labels = scales::dollar_format()) +
+  coord_obs_pred() +
+  theme_minimal()
+
+# You can now use the `final_fit` object to make predictions on new data.
+# The workflow is stored inside:
+final_model_object <- extract_workflow(final_fit)
+# saveRDS(final_model_object, "my_avm_model.rds")
+# To make predictions on new data:
+# loaded_model <- readRDS("my_avm_model.rds")
+# new_predictions <- predict(loaded_model, new_ames_data)
+```
+
+## Linear Regression vs XGBoost model comparison
+
+```{r mod_compare, eval = FALSE}
+# install.packages(c("caret", "leaps", "xgboost", "dplyr"))
+library(caret)
+library(leaps)
+
+set.seed(42)
+
+# ----------------------------
+# 0) Data: set up your dataset
+# ----------------------------
+# df: a data.frame with outcome and predictors
+# Example placeholders:
+# df <- your_data_frame
+
+y_col   <- "LN_PRICE"           # outcome
+#num_cols <- c("ABV", "IBU", "Price")     # numeric predictors
+#cat_cols <- c("Beer_Type", "Brewery")    # categorical predictors
+
+# Keep only used columns
+df <- df[, c(y_col, 'CRAWL', 'SLAB', 'LN_LANDRATIO', 'ARTERIAL',
+                   'SINGLE_FAMILY1STORY', 'SINGLE_FAMILY2STORY', 'HALF_DUPLEX1STORY', 'HALF_DUPLEX2STORY',
+                   'SMALLEST', 'SMALL', 'LARGE', 'LARGEST', 'AVG',
+                   'TWO_PLUS_BATHS', 'POWDER_ROOM', 'LN_GARAGESPACES', 'FIREPLACE',
+                   'EXCELLENT', 'VERY_GOOD', 'GOOD', 'AVERAGE', 'FAIR', 'POOR', 'VERY_POOR_UNSOUND',
+                   'QABOVE_AVG', 'QBELOW_AVG', 'Q_AVG',
+                   'YB_PRE_1929', 'YB_1930_TO_1945', 'YB_1946_TO_1960', 'YB_POST_1961',
+                   'HOT_WATER', 'ELEC_BASEBOARD', 'ELEC_WALL', 'WALL', 'CENTRAL_AIR', 'ELEC_RADIANT',
+                   'RADIANT_FLOOR', 'SPACE_HEATER',
+                   'MONTHS_1TO9', 'MONTHS_10TO16', 'MONTHS_17TO24')] # num_cols', 'cat_cols
+
+# Make sure outcome is numeric and cats are factors
+df[[y_col]] <- as.numeric(df[[y_col]])
+#for (cc in cat_cols) df[[cc]] <- as.factor(df[[cc]])
+
+# caret formula interface (caret will handle factor dummies)
+form <- as.formula(paste(y_col, "~ ."))
+
+# ------------------------------------------
+# 1) Define consistent outer CV (5-fold CV)
+# ------------------------------------------
+K_OUTER <- 5
+outer_folds <- createFolds(df[[y_col]], k = K_OUTER, returnTrain = TRUE)
+
+# Storage for outer-fold results
+res_outer <- data.frame(
+  fold        = seq_len(K_OUTER),
+  RMSE_linear = NA_real_, MAE_linear = NA_real_, R2_linear = NA_real_,
+  RMSE_xgb    = NA_real_, MAE_xgb    = NA_real_, R2_xgb    = NA_real_
+)
+
+# ------------------------------------------
+# 2) Inner CV and model specs
+# ------------------------------------------
+# Inner CV (for tuning / feature selection)
+inner_ctrl <- trainControl(
+  method      = "cv",
+  number      = 3,
+  verboseIter = FALSE
+)
+
+# Preprocess choices (center/scale; imputation optional if needed)
+# If you have missing values, consider preProcess = c("medianImpute","center","scale")
+pp <- c("center", "scale")
+
+# ---- Model A: Backward linear regression (leaps::regsubsets) via caret ----
+# 'nvmax' is the number of predictors in the final subset (after dummying).
+# You can set a sequence up to, say, 40; caret will choose the best via inner CV.
+lin_grid <- expand.grid(nvmax = 1:20)  # adjust upper bound to your feature count
+
+# ---- Model B: XGBoost (xgbTree) ----
+xgb_grid <- expand.grid(
+  nrounds          = c(300, 600, 900),
+  max_depth        = c(3, 5, 7),
+  eta              = c(0.03, 0.1),
+  gamma            = 0,                # keep simple first pass
+  colsample_bytree = c(0.7, 1.0),
+  min_child_weight = c(1, 5),
+  subsample        = c(0.7, 1.0)
+)
+
+# ------------------------------------------
+# 3) Nested CV loop
+# ------------------------------------------
+for (i in seq_len(K_OUTER)) {
+  cat(sprintf("\n=== OUTER FOLD %d/%d ===\n", i, K_OUTER))
+  tr_idx <- outer_folds[[i]]
+  te_idx <- setdiff(seq_len(nrow(df)), tr_idx)
+
+  train_dat <- df[tr_idx, , drop = FALSE]
+  test_dat  <- df[te_idx, , drop = FALSE]
+
+  # -- Model A: backward selection (inner tuning) --
+  lin_fit <- train(
+    form, data = train_dat,
+    method     = "leapBackward",  # requires the 'leaps' package
+    tuneGrid   = lin_grid,
+    trControl  = inner_ctrl,
+    preProcess = pp,
+    metric     = "RMSE"
+  )
+
+  # Predict on outer test
+  pred_lin <- predict(lin_fit, newdata = test_dat)
+  # Evaluate
+  lin_post <- postResample(pred_lin, test_dat[[y_col]])  # RMSE, R2
+  MAE_lin  <- mean(abs(pred_lin - test_dat[[y_col]]))
+
+  # -- Model B: XGBoost (inner tuning) --
+  xgb_fit <- train(
+    form, data = train_dat,
+    method     = "xgbTree",
+    tuneGrid   = xgb_grid,
+    trControl  = inner_ctrl,
+    preProcess = pp,
+    metric     = "RMSE",
+    verbose    = FALSE
+  )
+
+  pred_xgb <- predict(xgb_fit, newdata = test_dat)
+  xgb_post <- postResample(pred_xgb, test_dat[[y_col]])
+  MAE_xgb  <- mean(abs(pred_xgb - test_dat[[y_col]]))
+
+  # Save outer-fold metrics
+  res_outer$RMSE_linear[i] <- lin_post["RMSE"]
+  res_outer$R2_linear[i]   <- lin_post["Rsquared"]
+  res_outer$MAE_linear[i]  <- MAE_lin
+
+  res_outer$RMSE_xgb[i]    <- xgb_post["RMSE"]
+  res_outer$R2_xgb[i]      <- xgb_post["Rsquared"]
+  res_outer$MAE_xgb[i]     <- MAE_xgb
+}
+
+# ------------------------------------------
+# 4) Summary + paired differences
+# ------------------------------------------
+summ <- res_outer |>
+  summarize(
+    RMSE_linear = mean(RMSE_linear), RMSE_linear_sd = sd(RMSE_linear),
+    MAE_linear  = mean(MAE_linear),  MAE_linear_sd  = sd(MAE_linear),
+    R2_linear   = mean(R2_linear),   R2_linear_sd   = sd(R2_linear),
+    RMSE_xgb    = mean(RMSE_xgb),    RMSE_xgb_sd    = sd(RMSE_xgb),
+    MAE_xgb     = mean(MAE_xgb),     MAE_xgb_sd     = sd(MAE_xgb),
+    R2_xgb      = mean(R2_xgb),      R2_xgb_sd      = sd(R2_xgb)
+  )
+
+print(summ)
+
+# Paired fold-wise differences (XGB - Linear); positive RMSE diff means XGB worse
+rmse_diff <- res_outer$RMSE_xgb - res_outer$RMSE_linear
+mae_diff  <- res_outer$MAE_xgb  - res_outer$MAE_linear
+r2_diff   <- res_outer$R2_xgb   - res_outer$R2_linear
+
+cat("\nPaired differences across identical outer folds:\n")
+cat(sprintf("  RMSE diff (XGB - Linear): mean=%.4f, sd=%.4f\n",
+            mean(rmse_diff), sd(rmse_diff)))
+cat(sprintf("  MAE  diff (XGB - Linear): mean=%.4f, sd=%.4f\n",
+            mean(mae_diff),  sd(mae_diff)))
+cat(sprintf("  R2   diff (XGB - Linear): mean=%.4f, sd=%.4f\n",
+            mean(r2_diff),   sd(r2_diff)))
+
+# Optional: simple paired t-tests on fold-wise differences
+cat("\nPaired t-tests on outer-fold differences:\n")
+print(t.test(rmse_diff, mu = 0, paired = FALSE))  # small K; interpret cautiously
+print(t.test(mae_diff,  mu = 0, paired = FALSE))
+print(t.test(r2_diff,   mu = 0, paired = FALSE))
+
+```
+
+## ChatGPT 5 Comparison Script
+
+```{r chat_compare}
+# ============================================================
+# Compare Linear Regression vs XGBoost (tidymodels framework)
+# ============================================================
+
+set.seed(123)
+
+# ---- USER INPUTS -------------------------------------------
+df         <- df              # e.g., df <- mydata
+target     <- "LN_PRICE"                       # outcome column name (string)
+predictors <- c('CRAWL', 'SLAB', 'LN_LANDRATIO', 'ARTERIAL',
+                   'SINGLE_FAMILY1STORY', 'SINGLE_FAMILY2STORY', 'HALF_DUPLEX1STORY', 'HALF_DUPLEX2STORY',
+                   'SMALLEST', 'SMALL', 'LARGE', 'LARGEST', 'AVG',
+                   'TWO_PLUS_BATHS', 'POWDER_ROOM', 'LN_GARAGESPACES', 'FIREPLACE',
+                   'EXCELLENT', 'VERY_GOOD', 'GOOD', 'AVERAGE', 'FAIR', 'POOR', 'VERY_POOR_UNSOUND',
+                   'QABOVE_AVG', 'QBELOW_AVG', 'Q_AVG',
+                   'YB_PRE_1929', 'YB_1930_TO_1945', 'YB_1946_TO_1960', 'YB_POST_1961',
+                   'HOT_WATER', 'ELEC_BASEBOARD', 'ELEC_WALL', 'WALL', 'CENTRAL_AIR', 'ELEC_RADIANT',
+                   'RADIANT_FLOOR', 'SPACE_HEATER',
+                   'MONTHS_1TO9', 'MONTHS_10TO16', 'MONTHS_17TO24')            # <- your chosen predictors (character vector)
+# ------------------------------------------------------------
+
+# (1) Keep only rows with a *finite* outcome (guards against -Inf/NaN after logs)
+df <- df[is.finite(df[[target]]), , drop = FALSE]
+
+# (2) Make a slim copy with only the target + chosen predictors
+keep_cols <- intersect(colnames(df), c(target, predictors))
+missing_in_df <- setdiff(c(target, predictors), keep_cols)
+if (length(missing_in_df)) {
+  stop("These columns are not in df: ", paste(missing_in_df, collapse = ", "))
+}
+df_small <- df[, keep_cols, drop = FALSE]
+
+# ---- resampling ----
+split  <- initial_split(df_small, prop = 0.80, strata = !!sym(target))
+train  <- training(split)
+test   <- testing(split)
+folds  <- vfold_cv(train, v = 10, strata = !!sym(target))
+
+# ---- recipe (shared by both models) ----
+# - remove any remaining NAs
+# - drop zero-variance columns (per-fold safe)
+# - one-hot encode factors
+# - normalize numeric predictors
+rec <- recipe(as.formula(paste(target, "~ .")), data = train) %>%
+  step_naomit(all_predictors(), all_outcomes()) %>%
+  step_zv(all_predictors()) %>%
+  step_dummy(all_nominal_predictors(), one_hot = TRUE) %>%
+  step_normalize(all_numeric_predictors())
+
+# ============================================================
+# Model 1: Linear regression (no tuning)
+# ============================================================
+spec_lm <- linear_reg() %>%
+  set_engine("lm")
+
+wf_lm <- workflow() %>%
+  add_model(spec_lm) %>%
+  add_recipe(rec)
+
+# Cross-validated performance
+lm_cv <- fit_resamples(
+  wf_lm,
+  resamples = folds,
+  metrics   = metric_set(rmse, rsq, mae),
+  control   = control_resamples(save_pred = TRUE)
+)
+
+# ============================================================
+# Model 2: XGBoost regression (tuned)
+# ============================================================
+spec_xgb <- boost_tree(
+  mode           = "regression",
+  trees          = tune(),      # nrounds
+  tree_depth     = tune(),
+  learn_rate     = tune(),
+  loss_reduction = tune(),      # gamma
+  min_n          = tune(),      # min_child_weight (mapped)
+  mtry           = tune(),      # colsample_bytree
+  sample_size    = tune()       # subsample
+) %>%
+  set_engine("xgboost")
+
+wf_xgb <- workflow() %>%
+  add_model(spec_xgb) %>%
+  add_recipe(rec)
+
+# Parameter grid (data-aware for mtry)
+pset <- parameters(wf_xgb) %>%
+  # sensible bounds; adjust if needed
+  update(
+    trees          = trees(c(200, 1500)),
+    tree_depth     = tree_depth(c(2, 10)),
+    learn_rate     = learn_rate(c(-4, -1)),   # on log10 scale; converted by dials
+    loss_reduction = loss_reduction(c(-6, 3)),
+    min_n          = min_n(c(1, 20)),
+    mtry           = finalize(mtry(), train),
+    sample_size    = sample_prop(c(0.5, 1.0))
+  )
+
+grid <- grid_latin_hypercube(pset, size = 30)
+
+xgb_tuned <- tune_grid(
+  wf_xgb,
+  resamples = folds,
+  grid      = grid,
+  metrics   = metric_set(rmse, rsq, mae),
+  control   = control_grid(save_pred = TRUE)
+)
+
+best_xgb     <- select_best(xgb_tuned, metric = "rmse")
+xgb_final_wf <- finalize_workflow(wf_xgb, best_xgb)
+
+# ============================================================
+# Test-set evaluation (fair holdout)
+# ============================================================
+
+# Linear: fit to full training set, evaluate on test
+lm_last   <- last_fit(wf_lm, split, metrics = metric_set(rmse, rsq, mae))
+xgb_last  <- last_fit(xgb_final_wf, split, metrics = metric_set(rmse, rsq, mae))
+
+# --- Cross-validated metrics (train folds) ---
+cat("\n=== Cross-validated metrics (train folds) ===\n")
+cv_lm_tbl  <- collect_metrics(lm_cv)
+print(cv_lm_tbl)
+
+cat("\n--- XGBoost tuned (CV) ---\n")
+cv_xgb_tbl <- collect_metrics(xgb_tuned) %>%
+  dplyr::filter(.config == best_xgb$.config)
+print(cv_xgb_tbl)
+
+# --- Test-set metrics (holdout) ---
+cat("\n=== Test-set metrics ===\n")
+
+cat("\nLinear model on test:\n")
+lm_test_tbl  <- collect_metrics(lm_last)   # columns: .metric, .estimator, .estimate
+print(lm_test_tbl)
+
+cat("\nXGBoost (tuned) on test:\n")
+xgb_test_tbl <- collect_metrics(xgb_last)  # same columns
+print(xgb_test_tbl)
+
+# Side-by-side comparison for the test set
+test_compare <- dplyr::bind_rows(
+  lm_test_tbl  %>% dplyr::mutate(model = "linear"),
+  xgb_test_tbl %>% dplyr::mutate(model = "xgboost")
+) %>%
+  dplyr::select(model, .metric, .estimate) %>%
+  tidyr::pivot_wider(names_from = model, values_from = .estimate)
+
+cat("\n=== Test-set comparison (wide) ===\n")
+print(test_compare)
+
+# ============================================================
+# Inspect final fits / coefficients (optional)
+# ============================================================
+# Linear coefficients
+lm_fit_obj <- extract_fit_parsnip(lm_last$.workflow[[1]])$fit
+cat("\nLinear coefficients (test fit):\n")
+print(coef(lm_fit_obj))
+
+# XGBoost importances
+xgb_fit_obj <- extract_fit_parsnip(xgb_last$.workflow[[1]])$fit
+if (inherits(xgb_fit_obj, "xgb.Booster")) {
+  cat("\nXGBoost feature importance (Gain):\n")
+  print(xgboost::xgb.importance(model = xgb_fit_obj)[1:10, ])
+}
+
+```
+
+
+
+
+```{r}
+# --- Cross-validated metrics (train folds) ---
+cat("\n=== Cross-validated metrics (train folds) ===\n")
+cv_lm_tbl  <- collect_metrics(lm_cv)
+print(cv_lm_tbl)
+
+cat("\n--- XGBoost tuned (CV) ---\n")
+cv_xgb_tbl <- collect_metrics(xgb_tuned) %>%
+  dplyr::filter(.config == best_xgb$.config)
+print(cv_xgb_tbl)
+
+# --- Test-set metrics (holdout) ---
+cat("\n=== Test-set metrics ===\n")
+
+cat("\nLinear model on test:\n")
+lm_test_tbl  <- collect_metrics(lm_last)   # columns: .metric, .estimator, .estimate
+print(lm_test_tbl)
+
+cat("\nXGBoost (tuned) on test:\n")
+xgb_test_tbl <- collect_metrics(xgb_last)  # same columns
+print(xgb_test_tbl)
+
+# Side-by-side comparison for the test set
+test_compare <- dplyr::bind_rows(
+  lm_test_tbl  %>% dplyr::mutate(model = "linear"),
+  xgb_test_tbl %>% dplyr::mutate(model = "xgboost")
+) %>%
+  dplyr::select(model, .metric, .estimate) %>%
+  tidyr::pivot_wider(names_from = model, values_from = .estimate)
+
+cat("\n=== Test-set comparison (wide) ===\n")
+print(test_compare)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

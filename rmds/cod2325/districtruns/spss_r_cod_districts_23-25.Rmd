@@ -1,0 +1,439 @@
+---
+title: |
+  | Detroit Council Districts 1 - 7 Linear Regression Model Comparison:
+  | R | SPSS&nbsp;&nbsp;&nbsp;&nbsp;2023 - 2025 Sales
+author: |
+  | Elliot Dean - Program Analyst IV  
+  | Office of the Chief Financial Officer | Office of the Assessor
+  | City of Detroit
+date: "`r sub('^0', '', format(Sys.Date(), '%d %B %Y'))`"
+geometry: margin = 1.5cm
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+mainfont: Arial
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, error = FALSE, echo = FALSE)
+```
+
+```{r lib_load}
+library(tidyverse)   # data wrangling & ggplot2
+library(janitor)     # functions for examining and cleaning dirty data
+library(kableExtra)  # simple table generator
+library(here)        # Find files within a project
+library(olsrr)       # package for p-value backward elimination
+library(broom)       # summarizes key information about models
+library(rlang)       # functions for Base Types and Core R and 'Tidyverse' Features
+library(car)         # VIF, influence measures helpers
+library(scales)      # provides the internal scaling infrastructure used by ggplot
+library(effects)     # Effect Displays for Linear, Generalized Linear, and Other Models
+```
+
+```{r fun, results='hide'}
+codf     <- readRDS(file = here("rmds/modfunctions", "codfunctions.rds"))
+codform  <- readRDS(file = here("rmds", "codformulas.rds"))
+codf_env <- list2env(codf, parent = globalenv())
+for (nm in names(codf)) {environment(codf[[nm]]) <- codf_env}
+list2env(codf, envir = codf_env)
+source(here("rmds/cod2325/districtruns/d2325f", "spss_cod_district-7_23-25f.R"), local = knitr::knit_global())
+```
+
+```{r loadmodsdata}
+load(here("rmds/cod2325/districtruns/dmods", "spss_cod_district-1_23-25_June5.RData"))
+load(here("rmds/cod2325/districtruns/dmods", "spss_cod_district-2_23-25_June5.RData"))
+load(here("rmds/cod2325/districtruns/dmods", "spss_cod_district-3_23-25_June5.RData"))
+load(here("rmds/cod2325/districtruns/dmods", "spss_cod_district-4_23-25_June2.RData"))
+load(here("rmds/cod2325/districtruns/dmods", "spss_cod_district-5_23-25_June2.RData"))
+load(here("rmds/cod2325/districtruns/dmods", "spss_cod_district-6_23-25_June2.RData"))
+load(here("rmds/cod2325/districtruns/dmods", "spss_cod_district-7_23-25_June2.RData"))
+dfspss <- read_csv(here("data/spss", "spssmods.csv"))
+dfsps <- read_csv(here("data/spss", "spsscos.csv"))
+```
+
+---
+
+## Model I - Logarithm of Sale Price per Square Foot (LN_SPPSF)
+
+### Linear Regression Fit Statistics
+
+
+```{r fit1m1}
+rmt <- model_metrics_c(d1_mod_time_23_25_June5, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd1mod1") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 1 | LN\\_SPPSF Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r fit2m1}
+rmt <- model_metrics_c(d2_mod_time_23_25_June5, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd2mod1") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 2 | LN\\_SPPSF Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r fit3m1}
+rmt <- model_metrics_c(d3_mod_time_23_25_June5, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd3mod1") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 3 | LN\\_SPPSF Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r fit4m1}
+rmt <- model_metrics_c(d4_mod_time_23_25_June2, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd4mod1") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 4 | LN\\_SPPSF Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r fit5m1}
+rmt <- model_metrics_c(d5_mod_time_23_25_June2, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd5mod1") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 5 | LN\\_SPPSF Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r fit6m1}
+rmt <- model_metrics_c(d6_mod_time_23_25_June2, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd6mod1") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 6 | LN\\_SPPSF Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r fit7m1}
+rmt <- model_metrics_c(d7_mod_time_23_25_June2, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd7mod1") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 7 | LN\\_SPPSF Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+
+
+
+
+
+---
+
+## Model II - Logarithm of Sale Price (LN_PRICE) excluding ECFs
+
+### Linear Regression Fit Statistics
+
+```{r fit1m2}
+rmt <- model_metrics_c(d1_mod_ln_price_no_ecf_23_25_June5, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd1mod2") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 1 | LN\\_PRICE (No ECFs) Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r fit2m2}
+rmt <- model_metrics_c(d2_mod_ln_price_no_ecf_23_25_June5, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd2mod2") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 2 | LN\\_PRICE (No ECFs) Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r fit3m2}
+rmt <- model_metrics_c(d3_mod_ln_price_no_ecf_23_25_June5, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd3mod2") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 3 | LN\\_PRICE (No ECFs) Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r fit4m2}
+rmt <- model_metrics_c(d4_mod_ln_price_no_ecf_23_25_June2, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd4mod2") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 4 | LN\\_PRICE (No ECFs) Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r fit5m2}
+rmt <- model_metrics_c(d5_mod_ln_price_no_ecf_23_25_June2, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd5mod2") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 5 | LN\\_PRICE (No ECFs) Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r fit6m2}
+rmt <- model_metrics_c(d6_mod_ln_price_no_ecf_23_25_June2, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd6mod2") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 6 | LN\\_PRICE (No ECFs) Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r fit7m2}
+rmt <- model_metrics_c(d7_mod_ln_price_no_ecf_23_25_June2, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd7mod2") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 7 | LN\\_PRICE (No ECFs) Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+
+
+
+
+
+
+---
+
+## Model III - Logarithm of Sale Price (LN_PRICE)
+
+### Linear Regression Fit Statistics
+
+```{r fit1m3}
+rmt <- model_metrics_c(d1_mod_base_23_25_June5, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd1mod3") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 1 | LN\\_PRICE Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r fit2m3}
+rmt <- model_metrics_c(d2_mod_base_23_25_June5, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd2mod3") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 2 | LN\\_PRICE Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r fit3m3}
+rmt <- model_metrics_c(d3_mod_base_23_25_June5, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd3mod3") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 3 | LN\\_PRICE Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r fit4m3}
+rmt <- model_metrics_c(d4_mod_base_23_25_June2, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd4mod3") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 4 | LN\\_PRICE Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r fit5m3}
+rmt <- model_metrics_c(d5_mod_base_23_25_June2, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd5mod3") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 5 | LN\\_PRICE Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r fit6m3}
+rmt <- model_metrics_c(d6_mod_base_23_25_June2, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd6mod3") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 6 | LN\\_PRICE Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r fit7m3}
+rmt <- model_metrics_c(d7_mod_base_23_25_June2, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd7mod3") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 7 | LN\\_PRICE Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+
+
+
+
+
+
+---
+
+## Model IV - Logarithm of Sale Price (LN_PRICE) with Outlier Removal
+
+### Linear Regression Fit Statistics
+
+```{r fit1m4}
+rmt <- model_metrics_c(d1_mod_base_inliers_23_25_June5, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd1mod4") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 1 | LN\\_PRICE (Inliers) Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r fit2m4}
+rmt <- model_metrics_c(d2_mod_base_inliers_23_25_June5, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd2mod4") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 2 | LN\\_PRICE (Inliers) Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r fit3m4}
+rmt <- model_metrics_c(d3_mod_base_inliers_23_25_June5, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd3mod4") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 3 | LN\\_PRICE (Inliers) Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r fit4m4}
+rmt <- model_metrics_c(d4_mod_base_inliers_23_25_June2, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd4mod4") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 4 | LN\\_PRICE (Inliers) Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r fit5m4}
+rmt <- model_metrics_c(d5_mod_base_inliers_23_25_June2, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd5mod4") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 5 | LN\\_PRICE (Inliers) Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r fit6m4}
+rmt <- model_metrics_c(d6_mod_base_inliers_23_25_June2, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd6mod4") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 6 | LN\\_PRICE (Inliers) Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r fit7m4}
+rmt <- model_metrics_c(d7_mod_base_inliers_23_25_June2, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd7mod4") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 7 | LN\\_PRICE (Inliers) Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+
+
+
+
+
+---
+
+## Model V - Logarithm of Time Adjusted Sale Price (LN_TASP)
+
+### Linear Regression Fit Statistics
+
+```{r fit1m5}
+rmt <- model_metrics_c(d1_mod_tasp_23_25_June5, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd1mod5") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 1 | LN\\_TASP Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r fit2m5}
+rmt <- model_metrics_c(d2_mod_tasp_23_25_June5, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd2mod5") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 2 | LN\\_TASP Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r fit3m5}
+rmt <- model_metrics_c(d3_mod_tasp_23_25_June5, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd3mod5") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 3 | LN\\_TASP Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r fit4m5}
+rmt <- model_metrics_c(d4_mod_tasp_23_25_June2, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd4mod5") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 4 | LN\\_TASP Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r fit5m5}
+rmt <- model_metrics_c(d5_mod_tasp_23_25_June2, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd5mod5") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 5 | LN\\_TASP Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r fit6m5}
+rmt <- model_metrics_c(d6_mod_tasp_23_25_June2, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd6mod5") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 6 | LN\\_TASP Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r fit7m5}
+rmt <- model_metrics_c(d7_mod_tasp_23_25_June2, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd7mod5") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 7 | LN\\_TASP Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+---
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

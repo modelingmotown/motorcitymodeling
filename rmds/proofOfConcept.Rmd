@@ -1,0 +1,484 @@
+---
+title: "Modeling Motor City"
+subtitle: "Building an Automated Valuation Model for the City of Detroit"
+author: |
+  | Elliot Dean - Program Analyst IV  
+  | Office of the Chief Financial Officer | Office of the Assessor
+  | City of Detroit
+date: "`r sub('^0', '', format(Sys.Date(), '%d %B %Y'))`"
+geometry: margin = 1.5cm
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, error = FALSE)
+```
+
+---
+
+## Abstract
+
+The assessment of real estate is a complex process. Decades of research and protocol development
+have provided an enormous volume of resources available to improve the efficiency and accuracy
+of property valuation. As real estate markets can vary considerably between cities, the methods
+to determine value are not ubiquitous. While organizations such as the International Association
+of Assessing Officers (IAAO) have endeavored to recommend guidelines and approaches to valuation,
+the vast diversity of markets restricts implementation of a singular framework. If real estate is
+to be assessed equitably, the unique characteristics of the environment it is located in must be
+considered. Variables such as population demographics, average age of properties, market condition,
+legal statutes, and natural disaster risk may contribute to value. However, the impact of certain
+variables on assessed value are not uniform - 
+
+---
+
+This is an initial analysis of the sales data (northeastCustomSales.xlsx) provided by
+Monica Shihadeh on 2 September 2025. The excel file was converted to csv format,
+using the read_excel() and write_csv() functions. The libraries utilized for this
+analysis are listed below. Data was processed using similar methodology carried out
+in SPSS. The SPSS code (v1Hoods_NE-Area_NewCond_Syntax.sps) served as a template.
+Each block (chunk) of this document contains the sequential steps of the procedure.
+
+Block names and overall purpose are as follows:
+
+I.    lib_load      - activate libraries to be used
+II.   data_import   - load the sales csv file into RStudio as a dataframe
+III.  data_org_1    - creation of main variables and removing outliers
+IV.   mod_make_1    - linear regression model for the first target
+V.    data_org_2    - additional variable creation
+VI.   mod_1_stats   - evaluation of the first model
+VII.  mod_make_2    - linear regression model for the second target
+VIII. mod_2_stats   - evaluation of the second model
+IX.   mod_1_summary - detailed metrics of the first model
+X.    mod_2_summary - detailed metrics of the second model
+XI.   mod_save & mod_load - save and load models as R objects
+
+The ultimate goal of this project is to produce a linear model that can
+accurately predict the value of a residence from a given set of variables.
+This analysis is limited in scope to the northeast area of Detroit.
+As neighborhoods in the city vary considerably, multiple models will
+eventually be created to fine-tune performance.
+
+
+---
+
+## Load Necessary Libraries
+
+```{r lib_load}
+library(tidyverse)   # data wrangling & ggplot2
+library(janitor)     # functions for examining and cleaning dirty data
+library(lmtest)      # Breusch–Pagan test
+library(here)        # Find files within a project
+library(car)         # vif()
+library(ggpubr)      # Automatically print the regression equation for ggplot
+library(ggrepel)     # provides geoms for ggplot2 to repel overlapping text labels
+library(ggpmisc)     # Miscellaneous Extensions to 'ggplot2'
+library(ggpp)        # Grammar Extensions to 'ggplot2'
+library(spgwr)       # Functions for computing geographically weighted regressions
+library(tidymodels)  # collection of packages for modeling and machine learning
+library(bundle)      # Serialize Model Objects with a Consistent Interface
+library(psych)       # group statistics, including correlations and factor analysis
+library(kableExtra)  # make attractive tables
+library(broom)       # Convert Statistical Objects into Tidy tables
+library(scales)      # provides the internal scaling infrastructure used by ggplot2
+library(olsrr)       # package for p-value backward elimination
+library(MASS)        # Functions & datasets for Venables & Ripley
+library(rlang)       # Functions for Base Types and Core R and 'Tidyverse' Features
+library(gt)          # Easily create presentation-ready display tables
+library(gtsummary)   # create publication-ready analytical and summary tables
+library(skimr)       # Compact and Flexible Summaries of Data
+```
+
+### Create Custom Functions (Code in Appendix)
+
+```{r load-funs, include = FALSE, ref.label = "functions"}
+```
+
+---
+
+## Importing and Organizing Data
+
+```{r data_import}
+df <- read_csv(here("data", "allResiArmsLengthSalesSince2004.csv")) |> 
+  rename_with(toupper)
+```
+
+---
+
+## Total Residential Sales by Year
+
+```{r total_sales}
+date_col  <- "SALEDATE"         # datetime column
+price_col <- "SALEPRICE"        # numeric sale price (if you want dollar volume)
+
+df_clean <- df |>
+  mutate(
+    sale_date = as_date(!!sym(date_col)),    # safely convert to Date
+    year      = year(sale_date)
+  ) |> filter(!is.na(year))
+
+by_year_n <- df_clean %>%
+  count(year, name = "n_sales")
+
+ggplot(by_year_n, aes(x = factor(year), y = n_sales, fill = n_sales)) +
+  geom_col(width = 0.9) +
+  #geom_smooth(aes(group=1), se=FALSE, col='black', size=0.75) +
+  geom_text(aes(label = comma(n_sales)), vjust = -0.8, size = 7, fontface = "bold") +
+  #geom_label(aes(label = comma(n_sales)), vjust = -0.8, size = 3, fill="white") +
+  #geom_label_repel(aes(label = comma(n_sales)), force = 0.01, color = "white",
+  #                 fill = "black", force_pull = 2, label.size = 0.1) +
+  scale_y_continuous(labels = scales::comma, limits = c(0, 11000),
+                     expand = expansion(mult = c(0, 0.12))) +
+  scale_fill_viridis_c(option = "C", guide = "none") +
+  labs(
+    title = "Residential Property Sales by Year",
+    subtitle = "Citywide Transaction Counts",
+    x = "Year", y = "Number of Sales"
+  ) +
+  theme_minimal(base_size = 20) +
+  theme(
+    panel.grid.major.x = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    text = element_text(face = "bold"),         # everything bold...
+    axis.title = element_text(face = "bold"),  # ...except axes
+    axis.text  = element_text(face = "bold"),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  ) 
+  
+
+```
+
+
+```{r}
+
+scale_factor <- 1e6  # divide totals by 10^7
+
+by_year_amt <- df_clean %>%
+  filter(!is.na(.data[[price_col]])) %>%
+  group_by(year) %>%
+  summarise(total_sales = sum(.data[[price_col]], na.rm = TRUE), .groups = "drop") %>%
+  mutate(total_scaled = total_sales / scale_factor)
+
+pad <- 0.10 * max(by_year_amt$total_scaled, na.rm = TRUE)
+
+ggplot(by_year_amt, aes(x = factor(year), y = total_scaled, fill = total_scaled)) +
+  geom_col(width = 0.9) +
+  geom_text_repel(
+    aes(label = number(total_scaled, accuracy = 0.1)),  # 2 decimals; adjust as you like
+    direction = "y",
+    nudge_y = pad * 0.6,
+    min.segment.length = 0,
+    segment.size = 0,
+    box.padding = 0.08,
+    point.padding = 0.08,
+    force = 3,
+    max.overlaps = Inf,
+    seed = 42,
+    size = 7,
+    fontface = "bold"
+  ) +
+  scale_y_continuous(
+    labels = number_format(accuracy = 0.1),
+    limits = c(0, max(by_year_amt$total_scaled) + pad),
+    expand = expansion(mult = c(0, 0.02))
+  ) +
+  scale_fill_viridis_c(option = "C", guide = "none") +
+  labs(
+    title = "Residential Property Sales by Year",
+    subtitle = "Total Value of Citywide Transactions",  # "Totals divided by 10^7 (values shown are in $×10^7)",
+    x = "Year", y = "Total Sales (Million USD)"
+  ) +
+  theme_minimal(base_size = 20) +
+  theme(
+    text = element_text(face = "bold"),       # all bold...
+    axis.title = element_text(face = "bold"),# ...except axes
+    axis.text  = element_text(face = "bold"),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5),
+    panel.grid.major.x = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +
+  coord_cartesian(clip = "off")
+
+```
+
+
+
+```{r}
+by_year_amt <- df_clean %>%
+  filter(!is.na(.data[[price_col]])) %>%
+  group_by(year) %>%
+  summarise(total_sales = sum(.data[[price_col]], na.rm = TRUE), .groups = "drop")
+
+pad <- 0.1 * max(by_year_amt$total_sales, na.rm = TRUE)  # a bit more headroom for repel
+
+ggplot(by_year_amt, aes(x = factor(year), y = total_sales, fill = total_sales)) +
+  geom_col(width = 0.8) +
+  geom_text_repel(
+    aes(label = lab_sci_clean(digits = 3)(total_sales)),
+    direction = "y",
+    nudge_y = pad * 0.6,      # higher above bars
+    min.segment.length = 0,
+    segment.size = 0,
+    box.padding = 0.08,
+    point.padding = 0.08,
+    force = 3,
+    max.overlaps = Inf,
+    seed = 42,
+    size = 3,
+    fontface = "bold"         # bold labels
+  ) +
+  scale_y_continuous(
+    labels = lab_sci_clean(digits = 3),     # axis in clean scientific
+    limits = c(0, max(by_year_amt$total_sales) + pad),
+    expand = expansion(mult = c(0, 0.02))
+  ) +
+  scale_fill_viridis_c(option = "C", guide = "none") +
+  labs(
+    title = "Residential Property Sales by Year",
+    subtitle = "Total dollar volume",
+    x = NULL, y = "Total sales (scientific)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    text = element_text(face = "bold"),
+    axis.title = element_text(face = "plain"),
+    axis.text  = element_text(face = "plain"),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5),
+    panel.grid.major.x = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +
+  coord_cartesian(clip = "off")
+```
+
+
+
+
+
+```{r}
+ggplot(by_year_amt, aes(x = factor(year), y = total_sales, fill = total_sales)) +
+  geom_col(width = 0.8) +
+  #geom_text(aes(label = dollar(total_sales)), vjust = -0.3, size = 3) +
+  geom_text(aes(label=formatC(total_sales, format = "e", digits = 2, drop0trailing = TRUE)), vjust = -0.3, size = 3) +
+  scale_y_continuous(labels = dollar, expand = expansion(mult = c(0, 0.08))) +
+  scale_fill_viridis_c(option = "C", guide = "none") +
+  labs(
+    title = "Residential Property Sales by Year",
+    subtitle = "Total Market Value",
+    x = "Year", y = "Total Sales (USD)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.major.x = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    text = element_text(face = "bold"),         # everything bold...
+    axis.title = element_text(face = "plain"),  # ...except axes
+    axis.text  = element_text(face = "plain"),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  )
+
+ggplot(by_year_amt, aes(x = factor(year), y = total_sales, fill = total_sales)) +
+  geom_col(width = 0.8) +
+  # repel labels vertically, with a small upward nudge to keep distance from bars
+  geom_text_repel(
+    aes(label = label_scientific(digits = 3)(total_sales)),
+    direction = "y",
+    nudge_y = pad * 0.25,
+    min.segment.length = 0,
+    segment.size = 0,           # no leader lines
+    box.padding = 0.05,
+    point.padding = 0.05,
+    force = 2,
+    max.overlaps = Inf,
+    seed = 42,
+    size = 3
+  ) +
+  scale_y_continuous(
+    labels = label_scientific(digits = 3),
+    limits = c(0, max(by_year_amt$total_sales) + pad),
+    expand = expansion(mult = c(0, 0.02))
+  ) +
+  scale_fill_viridis_c(option = "C", guide = "none") +
+  labs(
+    title = "Residential Property Sales by Year",
+    subtitle = "Total dollar volume",
+    x = NULL, y = "Total sales (scientific)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    text = element_text(face = "bold"),
+    axis.title = element_text(face = "plain"),
+    axis.text  = element_text(face = "plain"),
+    plot.title = element_text(hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5),
+    panel.grid.major.x = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +
+  coord_cartesian(clip = "off")   # let repel move a bit above the panel if needed
+
+```
+
+
+
+
+---
+
+## Custom Functions
+
+```{r functions, eval = FALSE}
+gt_highlight_diffs <- function(data, col_a, col_b, n = 10, highlight = "#fff3bf",
+                               title = "Difference Table") {        # "#ffe6e6"                     
+  ca <- ensym(col_a); cb <- ensym(col_b)
+  d <- data |>
+    slice_head(n = n) |>
+    mutate(
+      .diff_row =
+        (is.na(!!ca) != is.na(!!cb)) |                              # one NA, one not
+        (!is.na(!!ca) & !is.na(!!cb) & (!!ca != !!cb))              # both present, not equal
+    )
+  gt_tbl <- d |> gt() |>
+    tab_style(    # highlight col_a cells where the row differs
+      style = list(cell_fill(color = highlight), cell_text(weight = "bold")),
+      locations = cells_body(columns = !!ca, rows = .diff_row)
+    ) |>
+    tab_style(    # highlight col_b cells where the row differs
+      style = list(cell_fill(color = highlight), cell_text(weight = "bold")),
+      locations = cells_body(columns = !!cb, rows = .diff_row)
+    ) |> cols_hide(.diff_row) |> tab_header(title = title)
+  gt_tbl
+}
+
+plot_lm_pvalues_two <- function(mod1, mod2, labels = c("Model 1", "Model 2"),
+                                drop_intercept = TRUE, digits = 3, alpha_line = 0.05,
+                                show_labels = TRUE) {
+  acc <- 10^(-digits)
+  eps <- 1e-16
+  td1 <- broom::tidy(mod1) |> mutate(.model = labels[1])
+  td2 <- broom::tidy(mod2) |> mutate(.model = labels[2])
+  df <- bind_rows(td1, td2)
+
+  if (drop_intercept) df <- df |> filter(term != "(Intercept)")
+  df <- df |>    # clamp tiny p for log scale; build formatted label
+    mutate(p_clamp = pmax(p.value, eps), label_fmt = scales::number(p.value, accuracy = acc))
+  
+  order_df <- df |> # order terms by lowest p across models so rows are comparable
+    group_by(term) |>
+    summarise(p_min = min(p_clamp, na.rm = TRUE), .groups = "drop")
+
+  df <- df |> left_join(order_df, by = "term") |>
+    mutate(term_ord = forcats::fct_reorder(term, p_min, .desc = TRUE)) # least sig at top
+  
+  pd <- position_dodge(dodge_width)    # dodge so two model points don’t overlap
+  p <- ggplot(df, aes(x = p_clamp, y = term_ord, colour = .model)) +
+    geom_point(size = 3, position = pd) +
+    geom_vline(xintercept = alpha_line, linetype = "dashed", colour = "red") +
+    scale_x_log10(name = "P-Value (log scale)",
+                  expand = expansion(mult = c(0.02, sidebar_space_mult))) +
+    labs(title = "Predictor p-values by model", y = "Predictor", colour = "Model") + theme_minimal()
+
+  if (show_labels) {
+    if (requireNamespace("ggrepel", quietly = TRUE)) {
+      p <- p + ggrepel::geom_text_repel(
+        aes(label = label_fmt), size = 2.5, position = pd, max.overlaps = 200,
+        box.padding = 0.25, point.padding = 0.2, min.segment.length = 0
+      )
+    } else {
+      p <- p + geom_text(
+        aes(label = label_fmt), size = 2.5, vjust = -0.6, position = pd, check_overlap = TRUE
+      )
+    }
+  }
+  p
+}
+
+plot_lm_pvalues_three <- function(mod1, mod2, labels = c("Model 1", "Model 2"), title = "Model",
+                                     drop_intercept = TRUE, digits = 3, alpha_line = 0.05,
+                                     show_labels = TRUE, label_style = c("decimal","scientific"),
+                                     format_axis_scientific = TRUE, dodge_width = 0.5) {
+  label_style <- match.arg(label_style)
+  acc <- 10^(-digits)
+  eps <- 1e-16
+  td1 <- broom::tidy(mod1) |> mutate(.model = labels[1])
+  td2 <- broom::tidy(mod2) |> mutate(.model = labels[2])
+  df  <- bind_rows(td1, td2)
+
+  if (drop_intercept) df <- df |> filter(term != "(Intercept)")
+  lbl_fun <- if (label_style == "scientific") {    # choose a label formatter
+    scales::label_scientific(digits = digits)
+  } else {function(x) scales::number(x, accuracy = acc)}
+
+  df <- df |> mutate(p_clamp = pmax(p.value, eps), label_fmt = lbl_fun(p.value))
+  order_df <- df |>    # order rows by smallest p across models
+    group_by(term) |>
+    summarise(p_min = min(p_clamp, na.rm = TRUE), .groups = "drop")
+
+  df <- df |>
+    left_join(order_df, by = "term") |>
+    mutate(term_ord = forcats::fct_reorder(term, p_min, .desc = TRUE))
+
+  pd <- position_dodge(width = dodge_width)
+  p <- ggplot(df, aes(x = p_clamp, y = term_ord, colour = .model)) +
+    geom_point(size = 3, position = pd) +
+    geom_vline(xintercept = alpha_line, linetype = "dashed", colour = "red") +
+    scale_x_log10(
+      name = "P-Value (log scale)",
+      labels = if (format_axis_scientific) scales::label_scientific() else waiver()
+    ) + labs(title = title, y = "Predictor", colour = "Model") +
+    theme_minimal() + coord_cartesian(clip = "off")
+
+  if (show_labels) {
+    if (requireNamespace("ggrepel", quietly = TRUE)) {
+      p <- p + ggrepel::geom_text_repel(aes(label = label_fmt),
+        size = 2.5, position = pd, max.overlaps = 200,
+        box.padding = 0.15, point.padding = 0.1, min.segment.length = 0
+      )
+    } else {
+      p <- p + geom_text(
+        aes(label = label_fmt), size = 2.5, vjust = -0.6, position = pd, check_overlap = TRUE
+      )
+    }
+  }
+  p
+}
+
+modmetrics <- function(model, title) {
+  s1 <- summary(model)
+  mod_df <- 
+    data.frame(
+      n           = nobs(model),
+      p           = length(coef(model)), # number of parameters (incl. intercept)
+      R2          = s1$r.squared,
+      Adj_R2      = s1$adj.r.squared,
+      ResStandDev = s1$sigma,  # residual std. dev. (RMSE-ish, with d.f. correction)
+      ResDegFree  = model$df.residual,         # residual degrees of freedom
+      RMSE        = sqrt(mean(residuals(model)^2)),
+      MAE         = mean(abs(residuals(model))),
+      AIC         = AIC(model)
+  )
+  gt(mod_df) |> tab_header(title = title)
+}
+
+# helper: clean scientific labels ("1e+05" -> "1e5")
+lab_sci_clean <- function(digits = 3) {
+  f <- scales::label_scientific(digits = digits)
+  function(x) {
+    s <- f(x)
+    gsub("e\\+?0*", "e", s)  # drop '+' and zero padding in exponent
+  }
+}
+
+```
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,903 @@
+---
+title: "District 1 SPSS Comparison 2023 - 2025 Sales"
+author: |
+  | Elliot Dean - Program Analyst IV  
+  | Office of the Chief Financial Officer | Office of the Assessor
+  | City of Detroit
+date: "`r sub('^0', '', format(Sys.Date(), '%d %B %Y'))`"
+geometry: margin = 1.5cm
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+mainfont: Arial
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, error = FALSE, echo = FALSE)
+```
+
+```{r lib_load}
+library(tidyverse)   # data wrangling & ggplot2
+library(janitor)     # functions for examining and cleaning dirty data
+library(kableExtra)  # simple table generator
+library(here)        # Find files within a project
+library(olsrr)       # package for p-value backward elimination
+library(broom)       # summarizes key information about models
+library(rlang)       # functions for Base Types and Core R and 'Tidyverse' Features
+library(car)         # VIF, influence measures helpers
+library(scales)      # provides the internal scaling infrastructure used by ggplot
+library(haven)       # to read SPSS files
+```
+
+```{r fun, results='hide'}
+codf    <- readRDS(file = here("rmds/modfunctions", "codfunctions.rds"))
+codform <- readRDS(file = here("rmds", "codformulas.rds"))
+codf_env <- list2env(codf, parent = globalenv())
+for (nm in names(codf)) {environment(codf[[nm]]) <- codf_env}
+list2env(codf, envir = codf_env)
+source(here("rmds/cod2325/districtruns/d2325f", "spss_cod_district-1_23-25f.R"), local = knitr::knit_global())
+```
+
+```{r setup1}
+# User inputs
+data_path <- here("data/city", "CCD1_2023-2025_Data.sav")  
+output_dir <- here("data/city/outs")
+# dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
+ecf_keep <- NULL       # Optional: add ECF filters here if needed, e.g. c("1R101", "1R102")
+base_ecf <- "1r135"    # Base ECF in the SPSS syntax
+```
+
+```{r prepdata}
+#df <- read_sav(data_path) |> rename_with(tolower)    # Load data
+df <- read_csv(here("data/city", "salesSFapr2023toMarch2025Updated.csv")) |>
+  rename_with(tolower) |> filter(ccd == 1)
+dfspss <- read_csv(here("data/spss", "spssmods.csv"))
+dfsps <- read_csv(here("data/spss", "spsscos.csv"))
+# Initial review / filters
+df <- df |> filter(ccd == 1)    # Equivalent to: SELECT IF CCD=1.
+if (!is.null(ecf_keep)) {df <- df |> filter(ecf %in% ecf_keep)}    # Optional ECF filter block
+
+df <- df |>    # Price categories
+  mutate(
+    priceclass = case_when(
+      saleprice < 45000 ~ 1L, saleprice >= 45000 & saleprice < 80000 ~ 2L,
+      saleprice >= 80000 & saleprice < 115000 ~ 3L,
+      saleprice >= 115000 & saleprice < 180000 ~ 4L,
+      saleprice >= 180000 & saleprice < 250000 ~ 5L, saleprice >= 250000 ~ 6L, TRUE ~ 0L
+    )
+  )
+
+df <- df |>    # Record filtering
+  mutate(
+    inn = ifelse(sresb_style %in% c("SINGLE FAMILY", "1/2 DUPLEX", "ROW HOUSE"), 1L, 0L)
+  ) |> filter(inn == 1)
+
+df <- df |>
+  mutate(
+    out = ifelse(
+      stotalsqft < 400 |
+      sresb_floorarea < 400 |
+      saleprice < 10000,
+      1L, 0L
+    )
+  ) |> filter(out == 0)
+# Remove duplicates: SPSS kept the "last" record by parcelno, saleprice, saledate
+df <- df |>
+  mutate(saledate_parsed = parse_sale_date(saledate)) |>
+  arrange(parcelno, saleprice, saledate_parsed) |>
+  group_by(parcelno, saleprice, saledate) |>
+  mutate(primarylast = if_else(row_number() == n(), 1L, 0L)) |>
+  ungroup() |> filter(primarylast == 1)
+
+df <- df |>    # Remove likely non-market sales where sale price ~= assessment
+  mutate(
+    priceisasmt_ratio = avwhensold / saleprice,
+    priceisasmt_ratio2 = ifelse(priceisasmt_ratio >= 0.90 & priceisasmt_ratio <= 1.10, 1, priceisasmt_ratio),
+    priceisasmt_ratio = priceisasmt_ratio2, priceisasmt = ifelse(priceisasmt_ratio == 1, 0L, 1L)
+  ) |> filter(priceisasmt == 1)
+# Setup calculations
+df <- df |> mutate(ratio = sesttcv / saleprice, sppsf = saleprice / sresb_floorarea)
+# Categorical binary transformations
+df <- df |>    # Style-height buckets
+  mutate(
+    onestory      = ifelse(sresb_styhgt <= 2, 1L, 0L),
+    twostory      = ifelse(sresb_styhgt > 2 & sresb_styhgt <= 5, 1L, 0L),
+    twoplusstory  = ifelse(sresb_styhgt > 5 & sresb_styhgt <= 8, 1L, 0L),
+    bilevelsplit  = ifelse(sresb_styhgt > 8 & sresb_styhgt <= 10, 1L, 0L),
+    check = onestory + twostory + twoplusstory + bilevelsplit,
+    # Base per syntax comment: SINGLE_FAMILY1STORY
+    single_family2story = ifelse(sresb_style == "SINGLE FAMILY" & twostory == 1, 1L, 0L),
+    half_duplex1story   = ifelse(sresb_style == "1/2 DUPLEX" & onestory == 1, 1L, 0L),
+    half_duplex2story   = ifelse(sresb_style == "1/2 DUPLEX" & twostory == 1, 1L, 0L)
+  )
+
+df <- df |>    # Building eras
+  mutate(
+    erabuilt = case_when(
+      sresb_yearbuilt < 1910 ~ 1L, sresb_yearbuilt >= 1910 & sresb_yearbuilt < 1930 ~ 2L,
+      sresb_yearbuilt >= 1930 & sresb_yearbuilt < 1946 ~ 3L,
+      sresb_yearbuilt >= 1946 & sresb_yearbuilt < 1961 ~ 4L,
+      sresb_yearbuilt >= 1961 & sresb_yearbuilt <= 1990 ~ 5L,
+      sresb_yearbuilt > 1990 ~ 6L, TRUE ~ 0L
+    ),
+    yb_pre_1910 = ifelse(erabuilt == 1, 1L, 0L), yb_1910_to_1929 = ifelse(erabuilt == 2, 1L, 0L),
+    yb_1930_to_1945 = ifelse(erabuilt == 3, 1L, 0L), yb_1961_to_1990 = ifelse(erabuilt == 5, 1L, 0L),
+    yb_post_1990 = ifelse(erabuilt == 6, 1L, 0L)
+  )
+
+df <- df |>    # Condition
+  mutate(
+    good = ifelse(scond == 2, 1L, 0L), fair = ifelse(scond == 4, 1L, 0L),
+    poor = ifelse(scond == 5, 1L, 0L), unsound = ifelse(scond == 7, 1L, 0L),
+    cavg = ifelse(scond == 3, 1L, 0L)
+  )
+
+df <- df |>    # Bathrooms
+  mutate(
+    two_baths        = ifelse(sresb_fullbaths == 2, 1L, 0L),
+    three_plus_baths = ifelse(sresb_fullbaths %in% 3:10, 1L, 0L),
+    powder_room      = ifelse(sresb_halfbaths %in% 1:5, 1L, 0L)
+  )
+
+df <- df |> mutate(fireplace = ifelse(sresb_fireplace %in% 1:6, 1L, 0L))    # Fireplace
+
+df <- df |>    # Basement/crawl/slab
+  mutate(
+    pctcrawl = sresb_crawspace / sresb_groundarea,
+    pctslab  = sresb_slabarea / sresb_groundarea,
+    pctbsmnt = sresb_basementarea / sresb_groundarea,
+    crawl    = ifelse(pctcrawl > pctbsmnt & pctcrawl > pctslab, 1L, 0L),
+    slab     = ifelse(pctslab > pctcrawl & pctslab > pctbsmnt, 1L, 0L)
+  )
+
+df <- df |>    # Building class
+  mutate(
+    qbest      = ifelse(sresb_bldgclass == 5, 1L, 0L), qavg = ifelse(sresb_bldgclass == 2, 1L, 0L),
+    qabove_avg = ifelse(sresb_bldgclass %in% c(3, 4), 1L, 0L),
+    qbelow_avg = ifelse(sresb_bldgclass == 1, 1L, 0L), qpoor = ifelse(sresb_bldgclass == 0, 1L, 0L)
+  )
+
+df <- df |>    # Garages
+  mutate(
+    garage = ifelse(sresb_garagearea >= 200, 1L, 0L),
+    garagespaces = case_when(
+      sresb_garagearea > 200 & sresb_garagearea < 420 ~ 1,
+      sresb_garagearea > 419 & sresb_garagearea < 600 ~ 2,
+      sresb_garagearea > 599 & sresb_garagearea < 820 ~ 3, sresb_garagearea > 819 ~ 4, TRUE ~ 0
+    ), ln_garagespaces = safe_log(garagespaces)
+  )
+
+df <- df |> mutate(arterial = ifelse(rd_class %in% c("A21", "A31"), 1L, 0L))    # Road class
+
+df <- df |>    # Heating/cooling
+  mutate(
+    hot_water = ifelse(sresb_heat == 2, 1L, 0L), elec_baseboard = ifelse(sresb_heat == 3, 1L, 0L),
+    wall = ifelse(sresb_heat %in% c(6, 8), 1L, 0L), central_air = ifelse(sresb_heat == 9, 1L, 0L)
+  )
+# Size buckets # NOTE: The SPSS syntax uses "< 12666" for size=3, which looks like a typo.
+# Here I use 1266 because that is consistent with the other cutpoints.
+df <- df |>
+  mutate(
+    size = case_when(
+      sresb_floorarea < 830 ~ 1L, sresb_floorarea >= 830 & sresb_floorarea < 1018 ~ 2L,
+      sresb_floorarea >= 1018 & sresb_floorarea < 1266 ~ 3L,
+      sresb_floorarea >= 1266 & sresb_floorarea < 1659 ~ 4L,
+      sresb_floorarea >= 1659 ~ 5L, TRUE ~ 0L
+    ),
+    smallest = ifelse(size == 1, 1L, 0L), small = ifelse(size == 2, 1L, 0L),
+    large    = ifelse(size == 4, 1L, 0L), largest = ifelse(size == 5, 1L, 0L)
+  )
+
+df <- df |>    # Time analysis setup
+  mutate(
+    smonth = month(saledate_parsed), syear = year(saledate_parsed),
+    months = case_when(
+      syear == 2023 ~ smonth - 3, syear == 2024 ~ smonth + 9,
+      syear == 2025 ~ smonth + 21, TRUE ~ NA_real_
+    )
+  )
+# NOTE: # The SPSS syntax says:
+#   RECODE scond (4=1)(ELSE=0) INTO average. # Earlier value labels say 3 = Average and 4 = Fair.
+# To preserve the SPSS text exactly, use scond == 4 below.
+df2 <- df |> mutate(average = ifelse(scond == 4, 1L, 0L))
+
+df_avg <- df2 |> filter(average == 1) |>
+  mutate(
+    sppsf = saleprice / sresb_floorarea, months_1to9 = pmin(months, 9),
+    months_10to18 = case_when(
+      months > 9  & months <= 18 ~ months - 9, months > 18 ~ 9, TRUE ~ 0
+    ), months_19to24 = case_when(months > 18 ~ months - 18, TRUE ~ 0),
+    ln_sppsf = safe_log(sppsf)
+  )
+
+df <- df |>    # Add time spline vars to full data too
+  mutate(
+    months_1to9 = pmin(months, 9),
+    months_10to18 = case_when(
+      months > 9  & months <= 18 ~ months - 9, months > 18 ~ 9, TRUE ~ 0
+    ), months_19to24 = case_when(months > 18 ~ months - 18, TRUE ~ 0), ln_sppsf = safe_log(sppsf)
+  )
+```
+
+---
+
+## Model I
+
+```{r mod1}
+# Time model
+time_terms <- c(
+  "arterial",
+  "single_family2story", "half_duplex1story", "half_duplex2story",
+  "smallest", "small", "large", "largest",
+  "two_baths", "three_plus_baths", "powder_room",
+  "good", "fair", "poor", "unsound",
+  "qabove_avg", "qbelow_avg",
+  "yb_pre_1910", "yb_1910_to_1929", "yb_1930_to_1945", "yb_1961_to_1990", "yb_post_1990",
+  "crawl", "slab",
+  "ln_garagespaces", "fireplace",
+  "hot_water", "elec_baseboard", "wall", "central_air",
+  "months_1to9", "months_10to18", "months_19to24"
+)
+
+time_formula <- reformulate(time_terms, response = "ln_sppsf")
+mod_time <- backward_pss(time_formula, data = df, p_out = 0.10, verbose = TRUE) # df_avg
+
+#model_summary_tbl(mod_time)
+# write_csv(broom::tidy(mod_time), file.path(output_dir, "ccd1_time_model_coefficients.csv"))
+# write_csv(model_summary_tbl(mod_time), file.path(output_dir, "ccd1_time_model_summary.csv"))
+```
+
+```{r src1}
+rmt <- model_metrics_c(mod_time, digits = 4)
+smod1 <- dfspss |> filter(spssmod == "ccd1mod1") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod1, r_df = rmt,
+  caption = "District 1 | LN\\_SPPSF Model Fit Statistics: SPSS vs R"
+)
+#res$data
+res$kable
+```
+
+```{r coef1}
+spsmod1 <- dfsps |> filter(codd == 1 & model == 1) |> select(model:sig) |>
+  mutate(term = trimws(tolower(term)), term = ifelse(term == "(constant)", "(intercept)", term))
+
+m1c <- make_coeff_compare_tabl(
+  model = mod_time, spss_df = spsmod1, include_intercept = TRUE, intercept_first = TRUE,
+  digits = 3, caption = "District 1 | Model I Coefficient Comparison: SPSS vs R"
+)
+
+m1c$kable
+```
+
+```{r rbs1}
+spsmod1a <- spsmod1
+spsmod1a$term <- tolower(spsmod1$term)
+
+res_compare1 <- codf$plot_beta_compare_lollipops(
+  model = mod_time, df = spsmod1a, df_term_col = "term", df_beta_col = "beta",
+  include_ecf = FALSE, model_label = "R", df_label = "SPSS",
+  title = "District 1 | Model I Beta Coefficient Comparison: SPSS vs R"
+)
+
+res_compare1$plot
+```
+
+```{r timeadj1}
+dfrate1 <- make_time_adjusted_df(df, mod_time, time_formula)
+
+df <- df |>
+  dplyr::mutate(
+    rate1_initial = dfrate1$rate1, rate2_initial = dfrate1$rate2, rate3_initial = dfrate1$rate3,
+    price_index_initial = dfrate1$price_index, end_index_initial = dfrate1$end_index,
+    taf_initial = dfrate1$taf, tasp_initial = dfrate1$tasp,
+    tasppsf_initial = dfrate1$tasppsf, ln_tasp_initial = dfrate1$ln_tasp
+  )
+```
+
+```{r updatedata1}
+df <- df |>    # Building size transformations
+  mutate(
+    lnsbldsf = safe_log(sresb_floorarea), sbldsfint = sresb_floorarea - 541,
+    lnsbldsfint = safe_log(sresb_floorarea - 541), sbldsfmed = sresb_floorarea - 1104,
+    lnsbldsfmed = safe_log(sresb_floorarea - 1104)
+  )
+
+df <- df |>    # Style-specific base building sizes from the syntax
+  mutate(
+    base_bldgsize = case_when(
+      sresb_style == "SINGLE FAMILY" ~ 1108, sresb_style == "1/2 DUPLEX" ~ 842, TRUE ~ NA_real_
+    ), base_bldgsize_ratio = sresb_floorarea / base_bldgsize,
+    ln_base_bldgsize_ratio = safe_log(base_bldgsize_ratio),
+    ln_sbldsf_bsz_single = ifelse(sresb_style == "SINGLE FAMILY", ln_base_bldgsize_ratio, 0),
+    ln_sbldsf_bsz_halfduplex = ifelse(sresb_style == "1/2 DUPLEX", ln_base_bldgsize_ratio, 0)
+  )
+
+df <- df |>    # Lot size / land ratio
+  mutate(
+    base_lotsize = case_when(
+      sresb_style == "SINGLE FAMILY" ~ 5184, sresb_style == "1/2 DUPLEX" ~ 3006,
+      TRUE ~ NA_real_
+    ), base_lotsize_ratio = stotalsqft / base_lotsize,
+    ln_base_lotsize_ratio = safe_log(base_lotsize_ratio),
+    landratio = stotalsqft / base_lotsize,
+    landratio2 = ifelse(landratio >= 0.90 & landratio <= 1.10, 1, landratio),
+    landratio2 = ifelse(sresb_style != "SINGLE FAMILY" & landratio > 3, 3, landratio2),
+    landratio2 = ifelse(sresb_style == "SINGLE FAMILY" & landratio > 4, 4, landratio2),
+    ln_landratio = safe_log(landratio2)
+  )
+```
+
+---
+
+## Model II
+
+```{r mod2}
+# Regression without ECFs
+df <- df |> mutate(ln_price = safe_log(saleprice), ln_tasp_initial = safe_log(tasp_initial))
+
+base_terms_no_ecf <- c(
+  "ln_landratio", "ln_base_bldgsize_ratio",
+  "arterial",
+  "single_family2story", "half_duplex1story", "half_duplex2story",
+  "smallest", "small", "large", "largest",
+  "two_baths", "three_plus_baths", "powder_room",
+  "good", "fair", "poor", "unsound",
+  "qabove_avg", "qbelow_avg",
+  "yb_pre_1910", "yb_1910_to_1929", "yb_1930_to_1945", "yb_1961_to_1990", "yb_post_1990",
+  "crawl", "slab",
+  "ln_garagespaces", "fireplace",
+  "hot_water", "elec_baseboard", "wall", "central_air",
+  "months_1to9", "months_10to18", "months_19to24"
+)
+
+mod_no_ecf <- backward_pss(
+  reformulate(base_terms_no_ecf, response = "ln_price"), data = df, p_out = 0.10, verbose = TRUE
+)
+#model_summary_tbl(mod_no_ecf)
+```
+
+```{r src2}
+rmt <- model_metrics_c(mod_no_ecf, digits = 4)
+smod2 <- dfspss |> filter(spssmod == "ccd1mod2") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod2, r_df = rmt,
+  caption = "District 1 | LN\\_PRICE (No ECFs) Model Fit Statistics: SPSS vs R"
+)
+#res$data
+res$kable
+```
+
+```{r coef2}
+spsmod2 <- dfsps |> filter(codd == 1 & model == 2) |> select(model:sig) |>
+  mutate(term = trimws(tolower(term)), term = ifelse(term == "(constant)", "(intercept)", term))
+
+m2c <- make_coeff_compare_tabl(
+  model = mod_no_ecf, spss_df = spsmod2, include_intercept = TRUE, intercept_first = TRUE,
+  digits = 3, caption = "District 1 | Model II Coefficient Comparison: SPSS vs R"
+)
+
+m2c$kable
+```
+
+```{r rbs2}
+spsmod2a <- spsmod2
+spsmod2a$term <- tolower(spsmod2$term)
+
+res_compare2 <- codf$plot_beta_compare_lollipops(
+  model = mod_no_ecf, df = spsmod2a, df_term_col = "term", df_beta_col = "beta",
+  include_ecf = FALSE, model_label = "R", df_label = "SPSS",
+  title = "District 1 | Model II Beta Coef. Comparison: SPSS vs R"
+)
+
+res_compare2$plot
+```
+
+```{r ecfsetupandcmatrix}
+# ecf dummies
+df <- make_ecf_dummies(df, base_ecf = base_ecf)
+ecf_terms <- paste0("ecf1r", sprintf("%03d", setdiff(101:137, 135)))
+
+# Correlation matrix of candidate predictors
+corr_terms <- c(base_terms_no_ecf[!base_terms_no_ecf %in% "months_19to24"], ecf_terms, "months_19to24")
+corr_df <- df |> select(any_of(corr_terms))
+corr_mat <- suppressWarnings(cor(corr_df, use = "pairwise.complete.obs"))
+```
+
+---
+
+## Model III
+
+```{r mod3}
+# Base model with ECFs
+base_terms_with_ecf <- c(base_terms_no_ecf[!base_terms_no_ecf %in% c()], ecf_terms)
+
+mod_1 <- backward_p(
+  reformulate(base_terms_with_ecf, response = "ln_price"), data = df,
+  p_out = 0.10, verbose = TRUE
+)
+
+df <- add_influence_metrics(df, mod_1, run_id = 1)
+df <- df |> mutate(esp1 = exp(pre_1), ratio1 = esp1 / saleprice)
+# ratio_outputs_1_df <- make_ratio_outputs_df(ratio_outputs_1)
+# ratio_outputs_1_df |> knitr::kable(digits = 3, caption = "Ratio Study Outputs")
+# ratio_stats(df$esp1, df$saleprice)
+# model_summary_tbl(mod_1)
+rmetrics3 <- codf$spss_ratio_metrics(df, esp1, saleprice)
+rmetrics3a <- rmetrics3 |> select(median_ratio:PRB)
+```
+
+```{r src31}
+rmt <- model_metrics_c(mod_1, digits = 4)
+smod3a <- dfspss |> filter(spssmod == "ccd1mod3") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod3a, r_df = rmt,
+  caption = "District 1 | LN\\_PRICE Model Fit Statistics: SPSS vs R"
+)
+#res$data
+res$kable
+```
+
+```{r src32}
+smod3b <- dfspss |> filter(spssmod == "ccd1mod3") |> select(median_ratio:PRB)
+res <- make_metrics_kable(spss_df = smod3b, r_df = rmetrics3a,
+  caption = "District 1 | LN\\_PRICE Model Assessing Statistics: SPSS vs R"
+)
+#res$data
+res$kable
+```
+
+```{r coef3, eval=FALSE}
+spsmod3 <- dfsps |> filter(codd == 1 & model == 3) |> select(model:sig) |>
+  mutate(term = trimws(tolower(term)), term = ifelse(term == "(constant)", "(intercept)", term))
+
+m3c <- make_coeff_compare_tabl(
+  model = mod_1, spss_df = spsmod3, include_intercept = TRUE, intercept_first = TRUE,
+  digits = 3, caption = "District 1 | Model III Coefficient Comparison: SPSS vs R"
+)
+m3c$kable
+```
+
+```{r cf3}
+spsmod3 <- dfsps |> filter(codd == 1 & model == 3) |> select(model:vif) |>
+  mutate(term = trimws(tolower(term)), term = ifelse(term == "(constant)", "(intercept)", term))
+
+tables3 <- compare_metrics_kables2(
+  mod = mod_1, spss_df = spsmod3, 
+  caption1 = "District 1 | Model III Coefficient Comparison: SPSS vs R", 
+  caption2 = "District 1 | Model III Coefficient Comparison: SPSS vs R", digits = 4
+)
+
+tables3$table1 # Print the first table (b, Std. Error, Beta, t)
+tables3$table2 # Print the second table (Sig, Tolerance, VIF)
+```
+
+```{r rbs3}
+spsmod3a <- spsmod3
+spsmod3a$term <- tolower(spsmod3$term)
+
+res_compare3 <- codf$plot_beta_compare_lollipops(
+  model = mod_1, df = spsmod3a, df_term_col = "term", df_beta_col = "beta",
+  include_ecf = FALSE, model_label = "R", df_label = "SPSS",
+  title = "District 1 | Model III Beta Coef. Comparison: SPSS vs R"
+)
+res_compare3$plot
+```
+
+```{r outremove}
+# Outlier removal by Cook's distance and studentized residuals
+n_model_1 <- nrow(df)
+df <- df |>
+  dplyr::mutate(in_inlier = dplyr::if_else(coo_1 > (4 / n_model_1) | abs(sdr_1) > 2, 0L, 1L))
+
+df_in <- df |> filter(in_inlier == 1)
+```
+
+---
+
+## Model IV
+
+```{r mod4}
+mod_2 <- backward_p(
+  reformulate(base_terms_with_ecf, response = "ln_price"),
+  data = df_in, p_out = 0.10, verbose = TRUE
+)
+
+df_in <- add_influence_metrics(df_in, mod_2, run_id = 2)
+df_in <- df_in |> mutate(esp2 = exp(pre_2), ratio2 = esp2 / saleprice)
+# ratio_stats(df_in$esp2, df_in$saleprice)
+#model_summary_tbl(mod_2)
+rmetrics4 <- codf$spss_ratio_metrics(df_in, esp2, saleprice)
+rmetrics4a <- rmetrics4 |> select(median_ratio:PRB)
+```
+
+```{r src41}
+rmt <- model_metrics_c(mod_2, digits = 4)
+smod4a <- dfspss |> filter(spssmod == "ccd1mod4") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod4a, r_df = rmt,
+  caption = "District 1 | LN\\_PRICE (Inliers) Model Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r src42}
+smod4b <- dfspss |> filter(spssmod == "ccd1mod4") |> select(median_ratio:PRB)
+res <- make_metrics_kable(spss_df = smod4b, r_df = rmetrics4a,
+  caption = "District 1 | LN\\_PRICE (Inliers) Model Assessing Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r coef4, eval=FALSE}
+spsmod4 <- dfsps |> filter(codd == 1 & model == 4) |> select(model:sig) |>
+  mutate(term = trimws(tolower(term)), term = ifelse(term == "(constant)", "(intercept)", term))
+
+m4c <- make_coeff_compare_tabl(
+  model = mod_2, spss_df = spsmod4, include_intercept = TRUE, intercept_first = TRUE,
+  digits = 3, caption = "District 1 | Model IV Coefficient Comparison: SPSS vs R"
+)
+
+m4c$kable
+```
+
+```{r cf4}
+spsmod4 <- dfsps |> filter(codd == 1 & model == 4) |> select(model:vif) |>
+  mutate(term = trimws(tolower(term)), term = ifelse(term == "(constant)", "(intercept)", term))
+
+tables4 <- compare_metrics_kables2(
+  mod = mod_2, spss_df = spsmod4, 
+  caption1 = "District 1 | Model IV Coefficient Comparison: SPSS vs R", 
+  caption2 = "District 1 | Model IV Coefficient Comparison: SPSS vs R", digits = 4
+)
+
+tables4$table1 # Print the first table (b, Std. Error, Beta, t)
+tables4$table2 # Print the second table (Sig, Tolerance, VIF)
+```
+
+```{r rbs4}
+spsmod4a <- spsmod4
+spsmod4a$term <- tolower(spsmod4$term)
+
+res_compare4 <- codf$plot_beta_compare_lollipops(
+  model = mod_2, df = spsmod4a, df_term_col = "term", df_beta_col = "beta",
+  include_ecf = FALSE, model_label = "R", df_label = "SPSS",
+  title = "District 1 | Model IV Beta Coef. Comparison: SPSS vs R"
+)
+
+res_compare4$plot
+```
+
+```{r timeadj2}
+time_formula2 <- reformulate(base_terms_with_ecf, response = "ln_price")
+
+dfrate2 <- make_time_adjusted_df(df_in, mod_2, time_formula2)
+
+df_in <- df_in |>
+  dplyr::mutate(
+    rate1_recal = dfrate2$rate1, rate2_recal = dfrate2$rate2, rate3_recal = dfrate2$rate3,
+    price_index_recal = dfrate2$price_index, end_index_recal = dfrate2$end_index,
+    taf_recal = dfrate2$taf, tasp_recal = dfrate2$tasp,
+    tasppsf_recal = dfrate2$tasppsf, ln_tasp_recal = dfrate2$ln_tasp 
+  )
+```
+
+---
+
+## Model V
+
+```{r mod5}
+# Regression with recalibrated time adjustments (no explicit time vars)
+base_terms_recal <- c(
+  "ln_landratio", "ln_base_bldgsize_ratio",
+  "arterial",
+  "single_family2story", "half_duplex1story", "half_duplex2story",
+  "smallest", "small", "large", "largest",
+  "two_baths", "three_plus_baths", "powder_room",
+  "good", "fair", "poor", "unsound",
+  "qabove_avg", "qbelow_avg",
+  "yb_pre_1910", "yb_1910_to_1929", "yb_1930_to_1945", "yb_1961_to_1990", "yb_post_1990",
+  "crawl", "slab",
+  "ln_garagespaces", "fireplace",
+  "hot_water", "elec_baseboard", "wall", "central_air",
+  ecf_terms
+)
+
+mod_3 <- backward_p(
+  reformulate(base_terms_recal, response = "ln_tasp_recal"),
+  data = df_in, p_out = 0.10, verbose = TRUE
+)
+
+df_in <- add_influence_metrics(df_in, mod_3, run_id = 3)
+df_in <- df_in |> mutate(esp3 = exp(pre_3), ratio3 = esp3 / tasp_recal)
+# ratio_stats(df_in$esp3, df_in$tasp_recal)
+#model_summary_tbl(mod_3)
+sigmafive <- summary(mod_3)$sigma
+df_in$spss_ratio_scale <- 1 / exp(0.5 * sigmafive^2)
+rmetrics5 <- codf$all_ratio_metrics(df_in, esp3, saleprice, adjust_to_spss = TRUE)
+rmetrics5a <- rmetrics5 |> select(median_ratio:PRB)
+```
+
+```{r src51}
+rmt <- model_metrics_c(mod_3, digits = 4)
+smod5a <- dfspss |> filter(spssmod == "ccd1mod5") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod5a, r_df = rmt,
+  caption = "District 1 | LN\\_TASP Model I Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r src52}
+smod5b <- dfspss |> filter(spssmod == "ccd1mod5") |> select(median_ratio:PRB)
+res <- make_metrics_kable(spss_df = smod5b, r_df = rmetrics5a,
+  caption = "District 1 | LN\\_TASP Model I Assessing Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r coef5, eval=FALSE}
+spsmod5 <- dfsps |> filter(codd == 1 & model == 5) |> select(model:sig) |>
+  mutate(term = trimws(tolower(term)), term = ifelse(term == "(constant)", "(intercept)", term))
+
+m5c <- make_coeff_compare_tabl(
+  model = mod_3, spss_df = spsmod5, include_intercept = TRUE, intercept_first = TRUE,
+  digits = 3, caption = "District 1 | Model V Coefficient Comparison: SPSS vs R"
+)
+
+m5c$kable
+```
+
+```{r cf5}
+spsmod5 <- dfsps |> filter(codd == 1 & model == 5) |> select(model:vif) |>
+  mutate(term = trimws(tolower(term)), term = ifelse(term == "(constant)", "(intercept)", term))
+
+tables5 <- compare_metrics_kables2(
+  mod = mod_3, spss_df = spsmod5, 
+  caption1 = "District 1 | Model V Coefficient Comparison: SPSS vs R", 
+  caption2 = "District 1 | Model V Coefficient Comparison: SPSS vs R", digits = 4
+)
+
+tables5$table1 # Print the first table (b, Std. Error, Beta, t)
+tables5$table2 # Print the second table (Sig, Tolerance, VIF)
+```
+
+```{r rbs5}
+spsmod5a <- spsmod5
+spsmod5a$term <- tolower(spsmod5$term)
+
+res_compare5 <- codf$plot_beta_compare_lollipops(
+  model = mod_3, df = spsmod5a, df_term_col = "term", df_beta_col = "beta",
+  include_ecf = FALSE, model_label = "R", df_label = "SPSS",
+  title = "District 1 | Model V Beta Coef. Comparison: SPSS vs R"
+)
+
+res_compare5$plot
+```
+
+---
+
+## Model VI
+
+```{r mod6}
+# Alternative recalibrated model:
+# use garage instead of ln_garagespaces, use lnsbldsfint instead of ln_base_bldgsize_ratio
+alt_terms <- c(
+  "ln_landratio", "lnsbldsfint",
+  "arterial",
+  "single_family2story", "half_duplex1story", "half_duplex2story",
+  "smallest", "small", "large", "largest",
+  "two_baths", "three_plus_baths", "powder_room",
+  "good", "fair", "poor", "unsound",
+  "qabove_avg", "qbelow_avg",
+  "yb_pre_1910", "yb_1910_to_1929", "yb_1930_to_1945", "yb_1961_to_1990", "yb_post_1990",
+  "crawl", "slab",
+  "garage", "fireplace",
+  "hot_water", "elec_baseboard", "wall", "central_air",
+  ecf_terms
+)
+
+mod_4 <- backward_pss(
+  reformulate(alt_terms, response = "ln_tasp_recal"), data = df_in, p_out = 0.10, verbose = TRUE
+)
+
+df_in <- add_influence_metrics(df_in, mod_4, run_id = 4)
+df_in <- df_in |> mutate(esp4 = exp(pre_4), ratio4 = esp4 / tasp_recal, modmv = esp4)
+sigmasix <- summary(mod_4)$sigma
+df_in$spss_ratio_scale <- 1 / exp(0.5 * sigmasix^2)
+
+rmetrics6 <- codf$all_ratio_metrics(df_in, esp4, saleprice, adjust_to_spss = TRUE)
+rmetrics6a <- rmetrics6 |> select(median_ratio:PRB)
+```
+
+```{r src61}
+rmt <- model_metrics_c(mod_4, digits = 4)
+smod6a <- dfspss |> filter(spssmod == "ccd1mod6") |> select(df_total:f_stat)
+res <- make_metrics_kable(spss_df = smod6a, r_df = rmt,
+  caption = "District 1 | LN\\_TASP Model II Fit Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r src62}
+smod6b <- dfspss |> filter(spssmod == "ccd1mod6") |> select(median_ratio:PRB)
+res <- make_metrics_kable(spss_df = smod6b, r_df = rmetrics6a,
+  caption = "District 1 | LN\\_TASP Model II Assessing Statistics: SPSS vs R"
+)
+res$kable
+```
+
+```{r coef6, eval=FALSE}
+spsmod6 <- dfsps |> filter(codd == 1 & model == 6) |> select(model:sig) |>
+  mutate(term = trimws(tolower(term)), term = ifelse(term == "(constant)", "(intercept)", term))
+
+m6c <- make_coeff_compare_tabl(
+  model = mod_4, spss_df = spsmod6, include_intercept = TRUE, intercept_first = TRUE,
+  digits = 3, caption = "District 1 | Model VI Coefficient Comparison: SPSS vs R"
+)
+
+m6c$kable
+```
+
+```{r cf6}
+spsmod6 <- dfsps |> filter(codd == 1 & model == 6) |> select(model:vif) |>
+  mutate(term = trimws(tolower(term)), term = ifelse(term == "(constant)", "(intercept)", term))
+
+tables6 <- compare_metrics_kables2(
+  mod = mod_4, spss_df = spsmod6, 
+  caption1 = "District 1 | Model VI Coefficient Comparison: SPSS vs R", 
+  caption2 = "District 1 | Model VI Coefficient Comparison: SPSS vs R", digits = 4
+)
+
+tables6$table1 # Print the first table (b, Std. Error, Beta, t)
+tables6$table2 # Print the second table (Sig, Tolerance, VIF)
+```
+
+```{r rbs6}
+spsmod6a <- spsmod6
+spsmod6a$term <- tolower(spsmod6$term)
+
+res_compare6 <- codf$plot_beta_compare_lollipops(
+  model = mod_4, df = spsmod6a, df_term_col = "term", df_beta_col = "beta",
+  include_ecf = FALSE, model_label = "R", df_label = "SPSS",
+  title = "District 1 | Model VI Beta Coef. Comparison: SPSS vs R"
+)
+
+res_compare6$plot
+```
+
+---
+
+## Model Comparison
+
+```{r coef7}
+res_extreme <- summarize_extreme_betas_kable(
+  mod_time, mod_no_ecf, mod_1, mod_2, mod_3, mod_4,
+  model_names = c("M1", "M2", "M3", "M4", "M5", "M6"),
+  top_n = 3,
+  bottom_n = 3,
+  caption = "Top and Bottom Standardized Beta Predictors across Models"
+)
+res_extreme$kable
+```
+
+```{r blp8}
+res_beta8 <- plot_avg_beta_lollipop_6models(
+  mod_time, mod_no_ecf, mod_1, mod_2, mod_3, mod_4,
+  model_names = c("M1", "M2", "M3", "M4", "M5", "M6"), top_n = 10,
+  title = "District 1 | Average Standardized Beta across Models"
+)
+res_beta8$plot
+```
+
+```{r modsav}
+d1_mod_time_23_25_June5 <- mod_time
+d1_mod_ln_price_no_ecf_23_25_June5 <- mod_no_ecf
+d1_mod_base_23_25_June5 <- mod_1
+d1_mod_base_inliers_23_25_June5 <- mod_2
+d1_mod_tasp_23_25_June5 <- mod_3
+d1_mod_alt_23_25_June5 <- mod_4
+
+save(d1_mod_time_23_25_June5, d1_mod_ln_price_no_ecf_23_25_June5,
+     d1_mod_base_23_25_June5, d1_mod_base_inliers_23_25_June5,
+     d1_mod_tasp_23_25_June5, d1_mod_alt_23_25_June5,
+     file = here("rmds/cod2325/districtruns/dmods", "spss_cod_district-1_23-25_June5.RData"))
+```
+
+
+
+```{r plots, eval=FALSE}
+# Basic plots roughly corresponding to SPSS graphs
+p1 <- ggplot(df_in, aes(x = tasp_recal, y = esp4, color = sresb_style)) +
+  geom_point(alpha = 0.5) + theme_minimal() + labs(title = "tasp vs esp4 by Style")
+
+p2 <- ggplot(df_in, aes(x = esp4, y = ratio4)) +
+  geom_point(alpha = 0.5) + theme_minimal() + labs(title = "esp4 vs ratio4")
+
+p3 <- ggplot(df_in, aes(x = ratio4)) + geom_histogram(bins = 40) +
+  theme_minimal() + labs(title = "Histogram of ratio4")
+
+p1
+```
+
+```{r plot1, eval=FALSE}
+p2
+```
+
+```{r plot2, eval=FALSE}
+p3
+```
+
+
+```{r rbp1, eval=FALSE}
+res_plot11 <- codf$plot_avg_beta_lollipop_dfs(
+  df = dfsps,
+  term_col = "term",
+  beta_col = "beta",
+  top_n = 10,
+  title = "LN_SPPSF Models – Standardized Beta Values"
+)
+
+res_plot11$plot
+```
+
+```{r glm1, eval=FALSE}
+library(glmnet)
+X <- model.matrix(reformulate(base_terms_with_ecf, response = "ln_price"), data = df_in)[, -1]
+y <- df_in$ln_price
+
+cvfit <- cv.glmnet(
+  x = X, y = y, alpha = 1,        # 1 = lasso, between 0 and 1 = elastic net
+  family = "gaussian"
+)
+plot(cvfit)
+coef(cvfit, s = "lambda.min")
+```
+
+```{r glm2, eval=FALSE}
+X <- model.matrix(reformulate(base_terms_recal, response = "ln_tasp_recal"), data = df_in)[, -1]
+y <- df_in$ln_tasp_recal
+
+cvfit <- cv.glmnet(
+  x = X, y = y, alpha = 1,        # 1 = lasso, between 0 and 1 = elastic net
+  family = "gaussian"
+)
+plot(cvfit)
+coef(cvfit, s = "lambda.min")
+```
+
+
+
+
+
+```{r t4, eval=FALSE}
+nrow(df)
+nrow(df_in)
+
+nobs(mod_3)
+nobs(mod_4)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

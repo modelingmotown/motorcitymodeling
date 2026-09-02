@@ -1,0 +1,1327 @@
+More model notes
+
+---
+
+Yep — below is a **single, reusable “bundle exporter”** that:
+
+1. **Collects multiple models by name** (strings) and saves them **together** into either an **`.rds`** (recommended) *or* an **`.RData`** file.
+2. **Also saves the data frames used for each model** (you can explicitly map model → df name; or it will try to infer from the model call).
+3. Builds a **single CSV** that includes:
+
+   * model name
+   * dataframe name
+   * timestamp (“date created” for the bundle; plus per-model timestamp)
+   * **coefficients** (one row per term per model)
+   * **SPSS-like summary metrics** (R, R², adj R², SEE, SS/df/MS/F/Sig, plus AIC/BIC/RMSE/MAE)
+
+It’s designed primarily for `lm` models (since you’re matching SPSS).
+
+---
+
+## 1) The function
+
+```r
+save_model_bundle <- function(model_names,
+                              bundle_path,
+                              manifest_csv_path,
+                              model_data_map = NULL,   # named character vec: c(modelA="dfA", modelB="dfB")
+                              data_names = NULL,       # optional additional dfs to store (character vector)
+                              format = c("rds", "RData"),
+                              envir = parent.frame(),
+                              overwrite = TRUE,
+                              digits = 6) {
+  format <- match.arg(format)
+
+  # --- helpers ---------------------------------------------------------------
+  .get_obj <- function(nm) {
+    if (!exists(nm, envir = envir, inherits = TRUE)) {
+      stop("Object not found in environment: ", nm, call. = FALSE)
+    }
+    get(nm, envir = envir, inherits = TRUE)
+  }
+
+  .infer_df_name_from_model <- function(mod) {
+    # Attempt to infer from model$call$data (works for lm() with data=)
+    cl <- tryCatch(mod$call, error = function(e) NULL)
+    if (is.null(cl) || is.null(cl$data)) return(NA_character_)
+    nm <- tryCatch(deparse(cl$data), error = function(e) NA_character_)
+    nm
+  }
+
+  .safe_num <- function(x) {
+    # ensure numeric scalar or NA_real_
+    if (length(x) == 0) return(NA_real_)
+    x <- suppressWarnings(as.numeric(x[1]))
+    ifelse(is.finite(x), x, NA_real_)
+  }
+
+  .lm_metrics <- function(mod) {
+    mf <- model.frame(mod)
+    y  <- model.response(mf)
+    e  <- residuals(mod)
+
+    n <- length(y)
+    df_res <- df.residual(mod)
+
+    has_intercept <- attr(terms(mod), "intercept") == 1
+    df_reg <- mod$rank - if (has_intercept) 1 else 0
+    df_total <- n - 1
+
+    sse <- sum(e^2)
+    sst <- sum((y - mean(y))^2)
+    ssr <- sst - sse
+
+    msr <- ssr / df_reg
+    mse <- sse / df_res
+
+    f_stat <- msr / mse
+    p_val  <- pf(f_stat, df_reg, df_res, lower.tail = FALSE)
+
+    r2 <- 1 - sse / sst
+    adj_r2 <- 1 - (1 - r2) * (df_total / df_res)
+    r <- sqrt(max(r2, 0))
+    see <- sqrt(mse)
+
+    rmse <- sqrt(mean(e^2))
+    mae  <- mean(abs(e))
+
+    c(
+      n = n,
+      r = r,
+      r_squared = r2,
+      adj_r_squared = adj_r2,
+      see = see,
+
+      ss_regression = ssr,
+      ss_residual   = sse,
+      ss_total      = sst,
+
+      df_regression = df_reg,
+      df_residual   = df_res,
+      df_total      = df_total,
+
+      ms_regression = msr,
+      ms_residual   = mse,
+
+      f = f_stat,
+      significance = p_val,
+
+      sigma = summary(mod)$sigma,
+      aic = AIC(mod),
+      bic = BIC(mod),
+      rmse = rmse,
+      mae = mae
+    )
+  }
+
+  .coef_table <- function(mod) {
+    if (inherits(mod, "lm")) {
+      sm <- summary(mod)$coefficients
+      out <- data.frame(
+        term = rownames(sm),
+        estimate = sm[, 1],
+        std_error = sm[, 2],
+        t_value = sm[, 3],
+        p_value = sm[, 4],
+        row.names = NULL,
+        check.names = FALSE
+      )
+      return(out)
+    }
+
+    # fallback if broom is available
+    if (requireNamespace("broom", quietly = TRUE)) {
+      td <- broom::tidy(mod)
+      if (!all(c("term", "estimate") %in% names(td))) stop("broom::tidy() did not return expected columns.")
+      # standardize a bit
+      if (!"std_error" %in% names(td) && "std.error" %in% names(td)) td$std_error <- td$std.error
+      if (!"t_value"   %in% names(td) && "statistic" %in% names(td)) td$t_value <- td$statistic
+      if (!"p_value"   %in% names(td) && "p.value" %in% names(td)) td$p_value <- td$p.value
+      keep <- intersect(c("term", "estimate", "std_error", "t_value", "p_value"), names(td))
+      return(as.data.frame(td[, keep, drop = FALSE]))
+    }
+
+    stop("Model is not 'lm' and broom is not installed; cannot extract coefficients.")
+  }
+
+  .rbind_fill <- function(a, b) {
+    # base R "bind_rows": union columns, fill missing with NA
+    cols <- union(names(a), names(b))
+    for (cc in setdiff(cols, names(a))) a[[cc]] <- NA
+    for (cc in setdiff(cols, names(b))) b[[cc]] <- NA
+    a <- a[, cols, drop = FALSE]
+    b <- b[, cols, drop = FALSE]
+    rbind(a, b)
+  }
+
+  # --- collect models ---------------------------------------------------------
+  bundle_created_at <- Sys.time()
+
+  models <- setNames(vector("list", length(model_names)), model_names)
+  data_used <- list()
+
+  model_rows <- NULL
+  coef_rows  <- NULL
+
+  for (mn in model_names) {
+    mod <- .get_obj(mn)
+
+    # attach a created_at attribute if not already present
+    if (is.null(attr(mod, "created_at"))) attr(mod, "created_at") <- bundle_created_at
+
+    # determine dataframe name for this model
+    df_name <- NA_character_
+    if (!is.null(model_data_map) && mn %in% names(model_data_map)) {
+      df_name <- model_data_map[[mn]]
+    } else {
+      df_name <- .infer_df_name_from_model(mod)
+    }
+
+    # load dataframe object if we can
+    df_obj <- NULL
+    if (!is.na(df_name) && nzchar(df_name) && exists(df_name, envir = envir, inherits = TRUE)) {
+      df_obj <- .get_obj(df_name)
+      data_used[[df_name]] <- df_obj
+    }
+
+    models[[mn]] <- mod
+
+    # metrics
+    metrics <- NULL
+    if (inherits(mod, "lm")) {
+      metrics <- .lm_metrics(mod)
+    } else if (requireNamespace("broom", quietly = TRUE)) {
+      # glance fallback for non-lm models
+      g <- broom::glance(mod)
+      # keep a few common ones if they exist
+      keep <- intersect(names(g), c("nobs", "r.squared", "adj.r.squared", "sigma", "AIC", "BIC"))
+      metrics <- as.numeric(g[1, keep, drop = TRUE])
+      names(metrics) <- keep
+    } else {
+      metrics <- c()
+    }
+
+    # coefficient table
+    ct <- .coef_table(mod)
+
+    # Build "model manifest row" (one per model)
+    mrow <- data.frame(
+      model_name = mn,
+      data_name = ifelse(is.na(df_name), "", df_name),
+      model_class = paste(class(mod), collapse = "/"),
+      formula = if (inherits(mod, "lm")) deparse(formula(mod)) else "",
+      created_at = format(attr(mod, "created_at"), tz = "UTC", usetz = TRUE),
+      bundle_created_at = format(bundle_created_at, tz = "UTC", usetz = TRUE),
+      stringsAsFactors = FALSE
+    )
+
+    if (length(metrics)) {
+      for (k in names(metrics)) mrow[[k]] <- .safe_num(metrics[[k]])
+    }
+
+    # add model row to model_rows
+    if (is.null(model_rows)) model_rows <- mrow else model_rows <- .rbind_fill(model_rows, mrow)
+
+    # Build coefficient rows (one per term)
+    crow <- ct
+    crow$model_name <- mn
+    crow$data_name  <- ifelse(is.na(df_name), "", df_name)
+    crow$created_at <- format(attr(mod, "created_at"), tz = "UTC", usetz = TRUE)
+
+    # also include selected model metrics per coefficient row (handy for filtering later)
+    if (length(metrics)) {
+      for (k in names(metrics)) crow[[k]] <- .safe_num(metrics[[k]])
+    }
+
+    # reorder
+    front <- c("model_name", "data_name", "created_at", "term", "estimate", "std_error", "t_value", "p_value")
+    rest  <- setdiff(names(crow), front)
+    crow  <- crow[, c(front, rest), drop = FALSE]
+
+    if (is.null(coef_rows)) coef_rows <- crow else coef_rows <- .rbind_fill(coef_rows, crow)
+  }
+
+  # include any additional dfs user asked to save
+  if (!is.null(data_names)) {
+    for (dn in data_names) {
+      if (exists(dn, envir = envir, inherits = TRUE)) {
+        data_used[[dn]] <- .get_obj(dn)
+      } else {
+        warning("data_names includes missing object: ", dn, call. = FALSE)
+      }
+    }
+  }
+
+  # --- Save the bundle --------------------------------------------------------
+  bundle <- list(
+    created_at = bundle_created_at,
+    models = models,
+    data = data_used,
+    model_manifest = model_rows,
+    coefficients = coef_rows
+  )
+
+  if (file.exists(bundle_path) && !overwrite) {
+    stop("bundle_path exists and overwrite=FALSE: ", bundle_path, call. = FALSE)
+  }
+
+  if (format == "rds") {
+    saveRDS(bundle, file = bundle_path)
+  } else {
+    # RData can save multiple objects; we save a single 'bundle' object for simplicity
+    save(bundle, file = bundle_path)
+  }
+
+  # --- Create one CSV that contains BOTH sections ----------------------------
+  # We'll stack them with a record_type column so it remains a single csv.
+  model_csv <- model_rows
+  model_csv$record_type <- "model"
+  # add term/coef columns for alignment
+  for (cc in c("term", "estimate", "std_error", "t_value", "p_value")) {
+    if (!cc %in% names(model_csv)) model_csv[[cc]] <- NA
+  }
+
+  coef_csv <- coef_rows
+  coef_csv$record_type <- "coefficient"
+
+  # align and combine
+  combined_csv <- model_csv
+  combined_csv <- combined_csv[, c("record_type", setdiff(names(combined_csv), "record_type")), drop = FALSE]
+  coef_csv     <- coef_csv[, c("record_type", setdiff(names(coef_csv), "record_type")), drop = FALSE]
+  combined_csv <- .rbind_fill(combined_csv, coef_csv)
+
+  # round numeric columns for readability in CSV
+  num_cols <- vapply(combined_csv, is.numeric, logical(1))
+  combined_csv[num_cols] <- lapply(combined_csv[num_cols], function(x) round(x, digits))
+
+  utils::write.csv(combined_csv, file = manifest_csv_path, row.names = FALSE)
+
+  invisible(list(
+    bundle_path = bundle_path,
+    manifest_csv_path = manifest_csv_path,
+    bundle = bundle,
+    combined_csv = combined_csv
+  ))
+}
+```
+
+---
+
+## 2) How to use it
+
+### Example: save 4 models + their dataframes (explicit mapping)
+
+```r
+out <- save_model_bundle(
+  model_names = c("full_model_A", "full_model_B", "full_model_C", "full_model_D"),
+  model_data_map = c(
+    full_model_A = "A",
+    full_model_B = "B",
+    full_model_C = "C",
+    full_model_D = "D"
+  ),
+  bundle_path = "housing_models_bundle.rds",
+  manifest_csv_path = "housing_models_manifest.csv",
+  format = "rds"
+)
+```
+
+### If your `lm()` calls use `data = A` etc., you can omit `model_data_map`
+
+It will try to infer `A` from `model$call$data`:
+
+```r
+out <- save_model_bundle(
+  model_names = c("full_model_A", "full_model_B"),
+  bundle_path = "bundle.rds",
+  manifest_csv_path = "manifest.csv"
+)
+```
+
+### Include extra dataframes not directly tied to a model
+
+```r
+out <- save_model_bundle(
+  model_names = c("m1", "m2"),
+  data_names = c("df_lookup", "df_test"),
+  bundle_path = "bundle.rds",
+  manifest_csv_path = "manifest.csv"
+)
+```
+
+---
+
+## 3) Loading the bundle later
+
+### For `.rds`
+
+```r
+bundle <- readRDS("housing_models_bundle.rds")
+names(bundle$models)
+names(bundle$data)
+
+mA <- bundle$models$full_model_A
+A  <- bundle$data$A
+```
+
+### For `.RData`
+
+```r
+load("housing_models_bundle.RData")
+# object 'bundle' will exist
+names(bundle$models)
+```
+
+---
+
+## Notes / gotchas (so this stays “safe”)
+
+* **Always use a stable mapping key** (e.g., `SALEID`) in your downstream work if you later re-join predictions/residuals.
+* If a model’s `data=` argument was something like `data = subset(A, GOOD==1)` or a piped object, inference may give a string that doesn’t exist as an object — in that case, you *should* supply `model_data_map`.
+* The CSV is **one file** with two “sections” mixed together using `record_type`:
+
+  * rows where `record_type == "model"` are model-level metrics
+  * rows where `record_type == "coefficient"` are coefficient rows (one per term)
+
+---
+
+If you want, I can extend this to also export:
+
+* **VIF/tolerance** (from `car::vif()` for `lm`)
+* **standardized betas**
+* **train/test metrics** (if you pass a test df + outcome column)
+
+
+---
+
+What you’re seeing is normal: when you switch the PDF font to **Arial via XeLaTeX**, the **font metrics change** (Arial is wider than Computer Modern/Latin Modern in many sizes), so a table that *barely fit before* can now **overflow the text block**. And no—**LaTeX/kable does not auto-rescale tables to fit the page**. `kable()` just emits a LaTeX `tabular` inside a `table` float; LaTeX will happily let it run past the margins unless you explicitly tell it to resize, rotate, or wrap.
+
+### Why it happens after Arial
+
+* **Different glyph widths** → same number of characters takes more horizontal space.
+* **Your table has many columns** (n, df_res, p, see, r2, adj_r2, rmse, mae, f_stat, f_p, aic, bic) → lots of fixed-width content.
+* LaTeX does **not** automatically “shrink-to-fit” tabular content.
+
+---
+
+## Fixes (pick the one you like)
+
+### 1) Auto-fit the table to page width (most SPSS-like “just make it fit”)
+
+Use `kableExtra::kable_styling(latex_options="scale_down")`:
+
+```r
+library(knitr)
+library(kableExtra)
+
+kable(tbl, format = "latex", booktabs = TRUE,
+      caption = "LN_PRICE (base) model fit statistics") %>%
+  kable_styling(latex_options = c("hold_position", "scale_down"))
+```
+
+This wraps the table in a resize box when needed.
+
+> If you previously got “data is too long” errors: that’s usually when `kableExtra` thinks it’s parsing a markdown table. Make sure `format="latex"` and you’re knitting to PDF with a LaTeX engine.
+
+---
+
+### 2) Reduce the table font size only (often enough)
+
+```r
+kable(tbl, format = "latex", booktabs = TRUE) %>%
+  kable_styling(latex_options = "hold_position", font_size = 7)
+```
+
+You can combine with `scale_down`:
+
+```r
+... %>% kable_styling(latex_options = c("hold_position", "scale_down"), font_size = 7)
+```
+
+---
+
+### 3) Put it in landscape (best if you have a lot of columns and want readability)
+
+```r
+kable(tbl, format="latex", booktabs=TRUE) %>%
+  kable_styling(latex_options = c("hold_position", "scale_down")) %>%
+  landscape()
+```
+
+(Requires `kableExtra`; it will add the needed LaTeX bits.)
+
+---
+
+### 4) Make numeric columns narrower (formatting)
+
+Long decimals waste width. Round aggressively and/or switch to scientific for AIC/BIC if needed:
+
+```r
+tbl2 <- tbl %>%
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+
+kable(tbl2, format="latex", booktabs=TRUE) %>%
+  kable_styling(latex_options = c("hold_position", "scale_down"))
+```
+
+Also consider renaming headers shorter: `adj_r2` → `adjR2`, `f_stat` → `F`, etc.
+
+---
+
+### 5) Use `tabularx` to allow wrapping (rarely ideal for numeric tables)
+
+This helps when you have long text columns; for numeric tables it’s usually worse. I’d only use it if you have text columns.
+
+---
+
+## Best “set it and forget it” pattern for wide tables
+
+If you want one helper you can reuse:
+
+```r
+kable_fit <- function(x, caption = NULL, digits = 3, font_size = 8) {
+  x2 <- x
+  num_cols <- vapply(x2, is.numeric, logical(1))
+  x2[num_cols] <- lapply(x2[num_cols], round, digits = digits)
+
+  knitr::kable(x2, format = "latex", booktabs = TRUE, caption = caption) %>%
+    kableExtra::kable_styling(
+      latex_options = c("hold_position", "scale_down"),
+      font_size = font_size
+    )
+}
+```
+
+Then:
+
+```r
+kable_fit(tbl, "LN_PRICE (base) model fit statistics")
+```
+
+---
+
+### Takeaway
+
+Switching to Arial didn’t “break” anything; it just made the table **wider**. LaTeX won’t auto-shrink it. The usual fix is **`scale_down`**, optionally with a smaller `font_size` and/or rounding.
+
+If you paste the chunk that produces this specific table (and your current YAML font settings), I can tailor the exact combo that will keep every table inside margins without making them unreadable.
+
+
+---
+
+Yes — in PDF/LaTeX you can put two `kable` tables **side-by-side** by wrapping them in **minipage** blocks (or `kableExtra::column_spec` etc.). The cleanest/least fragile approach is:
+
+1. render each table as LaTeX (`format="latex"`)
+2. capture the LaTeX as a string
+3. print two `minipage`s on one line
+
+Below is a drop-in helper that takes **two already-built VIF tibbles** (or data frames) and prints them side-by-side with independent captions.
+
+> This works best when each table is narrow (like your 3-column VIF/tolerance tables).
+
+---
+
+## Side-by-side kable for two VIF tables (PDF / LaTeX)
+
+````r
+```{r vif-side-by-side, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+library(knitr)
+library(kableExtra)
+library(dplyr)
+
+kable_vif_latex <- function(vif_df, caption = NULL, digits = 3, font_size = 7) {
+
+  vif_df <- vif_df %>%
+    mutate(across(where(is.numeric), ~ round(.x, digits)))
+
+  knitr::kable(
+    vif_df,
+    format   = "latex",
+    booktabs = TRUE,
+    caption  = caption,
+    align    = c("l", "r", "r")
+  ) %>%
+    kableExtra::kable_styling(
+      latex_options = c("hold_position"),
+      font_size = font_size,
+      full_width = FALSE
+    )
+}
+
+# ---- Example: replace these with YOUR two tables produced by your VIF function ----
+# vif_tbl_1 <- vif_out1  # term, vif, tolerance
+# vif_tbl_2 <- vif_out2
+
+tab1 <- kable_vif_latex(vif_tbl_1, caption = "VIF / GVIF (Model 1)")
+tab2 <- kable_vif_latex(vif_tbl_2, caption = "VIF / GVIF (Model 2)")
+
+# Convert to raw latex strings for minipage layout
+tab1_tex <- as.character(tab1)
+tab2_tex <- as.character(tab2)
+
+cat("
+\\noindent
+\\begin{minipage}[t]{0.49\\linewidth}
+\\centering
+", tab1_tex, "
+\\end{minipage}
+\\hfill
+\\begin{minipage}[t]{0.49\\linewidth}
+\\centering
+", tab2_tex, "
+\\end{minipage}
+")
+````
+
+````
+
+### Notes
+- Change `0.49\\linewidth` to `0.48` if you still get overflow.
+- Use a slightly smaller `font_size` (e.g., 6) if the tables are tall/wide.
+- Keep `full_width = FALSE` so it doesn’t try to stretch to the whole minipage.
+
+---
+
+## If you have **more than two** (e.g., 4 models)
+You can do a 2×2 grid with the same idea (two rows of minipages). If you want that, tell me how many models you’re printing, and I’ll drop a generalized function.
+
+---
+
+## Common gotcha
+If your VIF table has long `term` strings, the left column can force wrapping/overflow. Two simple mitigations:
+- shrink font (`font_size = 6`)
+- shorten/wrap term strings (e.g., replace underscores with `\\_` is handled automatically; but you can also abbreviate)
+
+---
+
+If you paste (or describe) what your VIF function currently returns (object names + columns), I’ll adapt this so you can literally do:
+
+```r
+vif_side_by_side(mod1, mod2, captions = c("Base", "Alt"))
+````
+
+…and it will compute + print both in one call.
+
+---
+
+```{r}
+save(df, file = here("data/rdata", "ECF_NE-Area23-25.RData"))
+```
+
+---
+
+`predict()` returning **`NA`** (instead of throwing an error) almost always means:
+
+1. **At least one predictor in `ndt` is `NA`/`NaN`** (or sometimes `Inf`), **or**
+2. `ndt` has a **factor level mismatch** vs what `mod_tasp` was trained on (often prints a warning like “factor has new levels …”, and the model matrix ends up with `NA`s).
+
+`predict.lm()` will happily return `NA` for that row when the constructed model matrix contains `NA`s.
+
+---
+
+## 1) First: verify you actually got one row back
+
+```r
+nrow(ndt)
+ndt %>% dplyr::select(saleid, dplyr::everything()) %>% dplyr::glimpse()
+```
+
+If `nrow(ndt) == 0`, you’d normally get `numeric(0)`, not `NA`, so you likely have 1 row — but confirm.
+
+---
+
+## 2) Identify *exactly which* variables are causing the `NA`
+
+The cleanest way is to ask the model what variables it expects, then check `ndt` for missing/non-finite values.
+
+```r
+resp <- as.character(formula(mod_tasp))[2]
+needed <- setdiff(names(model.frame(mod_tasp)), resp)
+
+# Which needed vars are NA?
+na_vars <- needed[vapply(ndt[needed], function(x) any(is.na(x) | is.nan(x)), logical(1))]
+
+# Which needed vars are Inf/-Inf?
+inf_vars <- needed[vapply(ndt[needed], function(x) any(is.infinite(x)), logical(1))]
+
+na_vars
+inf_vars
+
+# Show the actual problematic values
+ndt %>% dplyr::select(dplyr::any_of(unique(c(na_vars, inf_vars))))
+```
+
+If `na_vars` is non-empty, that’s your answer: your sale row has missing predictor(s) used by the model.
+
+### Common culprits in your workflow
+
+* Any `ln_*` variable where the raw value was 0 or negative and was logged (creates `-Inf`, then often becomes `NA` downstream).
+* A dummy block where none (or multiple) flags are set for that row.
+* A field that exists in the dataset but is blank for that specific sale.
+
+---
+
+## 3) Check factor level mismatches (very common)
+
+Even if there are no `NA`s, a factor mismatch can still introduce `NA`s when the model matrix is built.
+
+```r
+xlev <- .getXlevels(terms(mod_tasp), model.frame(mod_tasp))
+fac_vars <- intersect(names(xlev), names(ndt))
+
+bad_levels <- lapply(fac_vars, function(v) {
+  val <- as.character(ndt[[v]])
+  if (length(val) == 0) return(NULL)
+  if (is.na(val) || !(val %in% xlev[[v]])) val else NULL
+})
+bad_levels <- bad_levels[!vapply(bad_levels, is.null, logical(1))]
+bad_levels
+```
+
+Also check if `predict()` is warning you but you didn’t notice:
+
+```r
+predt <- predict(mod_tasp, newdata = ndt)
+warnings()
+predt
+```
+
+If you see “new levels”, you need to align factor levels.
+
+---
+
+## 4) Fixes (pick the one that matches what you find)
+
+### Fix A: Align factor levels to training (safe, recommended)
+
+```r
+mf_train <- model.frame(mod_tasp)
+xlev <- .getXlevels(terms(mod_tasp), mf_train)
+
+for (v in names(xlev)) {
+  if (v %in% names(ndt)) {
+    ndt[[v]] <- factor(as.character(ndt[[v]]), levels = xlev[[v]])
+  }
+}
+
+predt <- predict(mod_tasp, newdata = ndt)
+predt
+```
+
+If a value is truly unseen, it will become `NA` → prediction `NA`, which is correct unless you want an explicit fallback.
+
+---
+
+### Fix B: Your `ln_garagespaces` / log transforms created `-Inf`
+
+If `inf_vars` includes any `ln_*` column (especially garage-related), rebuild those as `log1p()`:
+
+```r
+df <- df %>%
+  dplyr::mutate(
+    ln_garagespaces = log1p(garagespaces)  # safe for 0
+  )
+```
+
+Then re-fit the model (or at least regenerate `ndt` from the updated `df`).
+
+---
+
+### Fix C: Impute missing predictors for single-row prediction (practical)
+
+If you want a prediction even when a row has missing values, impute from the training data:
+
+```r
+impute_newdata_like_training <- function(mod, newdata) {
+  mf_train <- model.frame(mod)
+  resp <- as.character(formula(mod))[2]
+  needed <- setdiff(names(mf_train), resp)
+
+  # Keep only what the model needs (optional but helps)
+  newdata <- newdata[, needed, drop = FALSE]
+
+  # Align factor levels
+  xlev <- .getXlevels(terms(mod), mf_train)
+  for (v in names(xlev)) {
+    if (v %in% names(newdata)) {
+      newdata[[v]] <- factor(as.character(newdata[[v]]), levels = xlev[[v]])
+    }
+  }
+
+  # Impute numerics w/ median, factors w/ mode
+  for (v in needed) {
+    if (!v %in% names(newdata)) next
+    if (is.numeric(mf_train[[v]])) {
+      bad <- is.na(newdata[[v]]) | is.nan(newdata[[v]]) | is.infinite(newdata[[v]])
+      if (any(bad)) newdata[[v]][bad] <- stats::median(mf_train[[v]], na.rm = TRUE)
+    } else if (is.factor(mf_train[[v]])) {
+      bad <- is.na(newdata[[v]])
+      if (any(bad)) {
+        mode_lvl <- names(sort(table(mf_train[[v]]), decreasing = TRUE))[1]
+        newdata[[v]][bad] <- mode_lvl
+        newdata[[v]] <- factor(newdata[[v]], levels = levels(mf_train[[v]]))
+      }
+    }
+  }
+
+  newdata
+}
+
+ndt2 <- impute_newdata_like_training(mod_tasp, ndt)
+predict(mod_tasp, newdata = ndt2)
+```
+
+That will produce a numeric prediction unless something is structurally broken.
+
+---
+
+## 5) One-liner “tell me what’s missing” (super handy)
+
+```r
+resp <- as.character(formula(mod_tasp))[2]
+needed <- setdiff(names(model.frame(mod_tasp)), resp)
+
+ndt %>%
+  dplyr::summarise(
+    dplyr::across(dplyr::all_of(needed),
+                  ~ sum(is.na(.) | is.nan(.) | is.infinite(.)),
+                  .names = "bad_{.col}")
+  ) %>%
+  tidyr::pivot_longer(dplyr::everything(), names_to = "var", values_to = "bad") %>%
+  dplyr::filter(bad > 0)
+```
+
+This outputs the exact predictor(s) responsible.
+
+---
+
+# 1) Is ecf actually in each model formula?
+attr(terms(mod_lm), "term.labels")
+attr(terms(mod_glm), "term.labels")
+
+# 2) Did each model see level "5R524" during training?
+"5R524" %in% levels(model.frame(mod_lm)$ecf)
+"5R524" %in% levels(model.frame(mod_glm)$ecf)
+
+# 3) What type is ecf in your newdata?
+class(ndt$ecf)
+levels(ndt$ecf)  # only meaningful if it's a factor
+
+library(stringr)
+
+# Create master levels ONCE from the full dataset you might ever predict on
+ecf_levels <- sort(unique(str_squish(toupper(as.character(df$ecf)))))
+
+# Apply before fitting BOTH models
+df_train$ecf <- factor(str_squish(toupper(as.character(df_train$ecf))), levels = ecf_levels)
+
+# Fit
+mod_glm <- glm(..., data = df_train, family = gaussian())  # example
+
+ndt$ecf <- factor(str_squish(toupper(as.character(ndt$ecf))), levels = ecf_levels)
+pred <- predict(mod_glm, newdata = ndt, type = "response")
+
+
+---
+
+Yes — you can “patch” `ln_garagespaces` in `nd` **right before `predict()`** so you don’t have to change the *formula text*. But there’s an important nuance:
+
+* If you replace bad values with **`NA`**, you’ll still get **`NA` predictions** (because the model matrix contains missing values).
+* So you need to replace **non-finite values** (`NA`, `NaN`, `Inf`, `-Inf`) with a **finite number**.
+
+### Why `ln_garagespaces` is breaking predictions
+
+Almost always it’s one of these:
+
+* You computed `ln_garagespaces = log(garagespaces)` and some sales have `garagespaces == 0` → `log(0) = -Inf`
+* Or the raw garagespaces is missing → `NA`
+* Or you did some divide/transform that produced `Inf`/`NaN`
+
+---
+
+## Best practice (no formula change, but you *should* refit once)
+
+If you want 0 garage spaces to map cleanly, the best definition is:
+
+* `ln_garagespaces <- log1p(garagespaces)`  (i.e., `log(1 + x)`)
+
+That gives:
+
+* 0 → `log1p(0) = 0`
+* 1 → `log1p(1) ≈ 0.693`
+* etc.
+
+**You don’t need to change your formula** (`ln_garagespaces` stays the same name). You just need to ensure the column is computed this way *in training and in newdata*.
+
+```r
+df <- df |> dplyr::mutate(ln_garagespaces = log1p(garagespaces))
+# refit mod_base once using the same formula (no change to formula text)
+```
+
+If you can refit, do this — it’s the cleanest.
+
+---
+
+## If you do NOT want to refit: patch `nd` right before predict
+
+Here are three reasonable “pre-predict” strategies. Pick one.
+
+### Strategy A: Replace non-finite with 0 (ONLY correct if your ln was `log1p`)
+
+If your training definition was already `log1p`, then `0` is the right value for “0 garagespaces”.
+
+```r
+nd$ln_garagespaces[!is.finite(nd$ln_garagespaces)] <- 0
+pred <- predict(mod_base, newdata = nd)
+```
+
+If your training definition was `log(garagespaces)`, then `0` corresponds to **garagespaces = 1** (because `exp(0)=1`), so this may bias predictions.
+
+---
+
+### Strategy B: Replace non-finite with the *training median* of `ln_garagespaces` (safe, no refit)
+
+This is the best “don’t refit, don’t change formula” option.
+
+```r
+train_ln <- model.frame(mod_base)$ln_garagespaces
+fill <- median(train_ln[is.finite(train_ln)], na.rm = TRUE)
+
+nd$ln_garagespaces[!is.finite(nd$ln_garagespaces)] <- fill
+pred <- predict(mod_base, newdata = nd)
+```
+
+This is consistent with how you’d impute a missing numeric predictor.
+
+---
+
+### Strategy C: If you have raw `garagespaces` in `nd`, recompute `ln_garagespaces` consistently
+
+This is ideal if `nd` contains the original count column:
+
+* If your model was trained on `log1p`: recompute `log1p(garagespaces)`
+* If your model was trained on `log`: recompute `log(pmax(garagespaces, 1))` (forces 0→1 to avoid `-Inf`)
+
+```r
+# choose ONE depending on how the model was trained:
+nd$ln_garagespaces <- log1p(nd$garagespaces)              # recommended (but only consistent if trained that way)
+# nd$ln_garagespaces <- log(pmax(nd$garagespaces, 1))     # consistent-ish with log, but treats 0 as 1
+
+pred <- predict(mod_base, newdata = nd)
+```
+
+---
+
+## A reusable “pre-predict patch” function (targets ln_garagespaces only)
+
+This keeps your workflow clean:
+
+```r
+patch_ln_garagespaces <- function(model, newdata,
+                                  var = "ln_garagespaces",
+                                  method = c("train_median", "zero", "value"),
+                                  value = 0) {
+  method <- match.arg(method)
+
+  if (!var %in% names(newdata)) {
+    stop("newdata is missing column: ", var, call. = FALSE)
+  }
+
+  bad <- !is.finite(newdata[[var]])
+
+  if (!any(bad)) return(newdata)
+
+  fill <- switch(
+    method,
+    train_median = {
+      tr <- model.frame(model)[[var]]
+      median(tr[is.finite(tr)], na.rm = TRUE)
+    },
+    zero = 0,
+    value = value
+  )
+
+  newdata[[var]][bad] <- fill
+  newdata
+}
+
+nd <- newdata_from_sale2(data = cdf, model = mod_base, sale_col = "saleid", sale_id = 4782482)
+
+nd <- patch_ln_garagespaces(mod_base, nd, method = "train_median")
+pred <- predict(mod_base, newdata = nd)
+pred
+```
+
+---
+
+## Quick “prove it” diagnostic (so you can see the bad value)
+
+```r
+nd |> dplyr::summarise(
+  n = dplyr::n(),
+  n_bad = sum(!is.finite(ln_garagespaces)),
+  bad_vals = paste(unique(ln_garagespaces[!is.finite(ln_garagespaces)]), collapse = ", ")
+)
+```
+
+If you see `-Inf` in `bad_vals`, it’s almost certainly `log(0)`.
+
+---
+
+## Recommendation
+
+* If `garagespaces` can be 0 (it can), the best modeling choice is to **define** `ln_garagespaces = log1p(garagespaces)` and refit. You can keep the formula unchanged by keeping the same column name.
+* If you can’t refit right now, use **training-median imputation** (Strategy B). It avoids introducing a fake “1 garage” effect.
+
+If you tell me whether your training `ln_garagespaces` was computed using `log()` or `log1p()`, I’ll tell you which patch is least biased for your current model.
+
+
+---
+
+Yes — and it’s actually *cleaner* for functions than for formulas because you can keep them **namespaced** instead of dumping 50 objects into `.GlobalEnv`.
+
+Here are the best patterns (from “quick and practical” to “most professional”).
+
+---
+
+## Option 1 (easy + no packages): put functions in an `.R` file and `source()` into an environment
+
+Instead of `source("helpers.R")` (which floods your global env), do this:
+
+```r
+# in your Rmd (or a setup script)
+helpers <- new.env(parent = emptyenv())
+sys.source("helpers.R", envir = helpers)
+
+# call functions like this:
+helpers$prep_cod_sales(df)
+helpers$backward_p(formula, data = df)
+helpers$gam_concurvity_table(mod_gam)
+```
+
+### Why this is great
+
+* Your environment stays clean.
+* You still get modular code.
+* Easy to version control.
+
+**Tip:** inside `helpers.R`, you can just define functions normally:
+
+```r
+prep_cod_sales <- function(df, ...) { ... }
+backward_p <- function(formula, data, ...) { ... }
+```
+
+They’ll live inside `helpers`, not in `.GlobalEnv`.
+
+---
+
+## Option 2 (even easier for re-use): save a list (or environment) of functions to an `.rds`
+
+You *can* save functions, yes.
+
+### A) Save a named list of functions
+
+```r
+my_funs <- list(
+  prep_cod_sales = prep_cod_sales,
+  backward_p = backward_p,
+  add_inlier_flags_lm = add_inlier_flags_lm
+)
+
+saveRDS(my_funs, "my_funs.rds")
+```
+
+Load in Rmd:
+
+```r
+f <- readRDS("my_funs.rds")
+f$prep_cod_sales(df)
+```
+
+### B) Save an environment of functions (my preference if you want “namespace feel”)
+
+```r
+helpers <- new.env(parent = emptyenv())
+helpers$prep_cod_sales <- prep_cod_sales
+helpers$backward_p <- backward_p
+
+saveRDS(helpers, "helpers_env.rds")
+```
+
+Load:
+
+```r
+helpers <- readRDS("helpers_env.rds")
+helpers$prep_cod_sales(df)
+```
+
+**Caveat:** this is totally valid, but if your functions reference other functions/objects by name, make sure they’re either in the same env or in the search path (e.g., packages loaded). It’s usually fine if the functions rely on packages like `dplyr`/`mgcv` being loaded in the Rmd.
+
+---
+
+## Option 3 (best long-term): make a tiny internal package
+
+If you’re doing this a lot, a package is the cleanest:
+
+* Functions live under `R/`
+* You install it locally (`devtools::install()` or `pak::local_install()`)
+* You call functions with a namespace, e.g. `codtools::prep_cod_sales(df)`
+
+This gives you:
+
+* documentation
+* versioning
+* tests (huge for reproducibility)
+
+If you want the lightweight version, you can use `usethis::create_package()` and keep it private.
+
+---
+
+## Option 4: `box` modules (nice middle ground)
+
+`box` lets you do:
+
+```r
+box::use(./helpers[prep_cod_sales, backward_p])
+```
+
+and it doesn’t pollute global env. Great if you like a Python-ish import style.
+
+---
+
+# My recommendation for your workflow (Rmd + many helpers)
+
+Use **Option 1** (`sys.source()` into an env). It’s the least ceremony and fixes the “blob of functions” problem immediately.
+
+### Minimal setup chunk for your Rmd
+
+```r
+helpers <- new.env(parent = emptyenv())
+sys.source("R/helpers.R", envir = helpers)
+
+# optional: attach for autocomplete but still not global (not always necessary)
+# attach(helpers, name = "helpers")
+```
+
+Then you always call `helpers$...`.
+
+---
+
+Yes — you can turn your “pile of functions” into a real R package, and you don’t have to do it all by hand. The modern, low-pain workflow is **usethis + roxygen2 + devtools**, which is exactly what the R Packages book recommends. ([R Packages][1])
+
+Below is a practical, end-to-end recipe that works whether your functions are currently in `.R` files, in your global environment, or saved in an `.rds` list.
+
+---
+
+## The simplest good workflow (recommended)
+
+### 1) Create a package skeleton
+
+In R (or RStudio Console):
+
+```r
+install.packages(c("usethis", "devtools", "roxygen2"))
+usethis::create_package("~/path/to/codtools")
+```
+
+`create_package()` makes the basic structure (`DESCRIPTION`, `NAMESPACE`, `R/`, etc.). ([Use This][2])
+
+---
+
+### 2) Put your functions into `R/` as plain `.R` files
+
+Create one or more files under `codtools/R/`, e.g.:
+
+* `R/prep.R`
+* `R/modeling.R`
+* `R/plots.R`
+
+Each file can contain multiple functions.
+
+**Important:** do *not* wrap them in `source()` inside the package; just define them.
+
+---
+
+### 3) Add roxygen2 docs and exports
+
+Above each function you want public, add roxygen comments + `@export`:
+
+```r
+#' Backward elimination by term-level p-values
+#'
+#' Drops the worst term using drop1() partial F-tests until all remaining terms
+#' have p <= p_out.
+#' @param formula A model formula.
+#' @param data A data frame.
+#' @param p_out Drop terms with p-value > p_out.
+#' @param verbose Print dropped terms.
+#' @return An lm object.
+#' @export
+backward_p <- function(formula, data, p_out = 0.10, verbose = TRUE) {
+  # ...
+}
+```
+
+roxygen2 generates `.Rd` docs and your `NAMESPACE` automatically. ([roxygen2.r-lib.org][3])
+
+Then run:
+
+```r
+devtools::document()
+```
+
+---
+
+### 4) Load and test your package during development
+
+From the package root directory:
+
+```r
+devtools::load_all()
+```
+
+Now you can call exported functions like:
+
+```r
+codtools::backward_p(...)
+```
+
+---
+
+### 5) Add tests (optional but strongly recommended)
+
+```r
+usethis::use_testthat()
+usethis::use_test("backward_p")
+```
+
+Write tests in `tests/testthat/test-backward_p.R`.
+
+---
+
+### 6) Check the package
+
+```r
+devtools::check()
+```
+
+`R CMD check` is the gold standard. ([R Packages][4])
+
+---
+
+## How to get from “a list of functions” (e.g., an `.rds`) into a package
+
+If you literally have a list like `funs <- readRDS("my_funs.rds")` where each element is a function object, you *can* convert them into `.R` files — but you’ll lose comments unless you kept them elsewhere.
+
+A practical approach:
+
+### A) Source from your existing `.R` files instead (best)
+
+If your functions already exist in one or more `.R` files: just copy those files into `R/` and add roxygen.
+
+### B) If you only have function objects in a list, write them out
+
+This will write one file per function (you can then consolidate + add docs):
+
+```r
+write_functions_to_package <- function(funs, pkg_path, r_dir = "R") {
+  dir.create(file.path(pkg_path, r_dir), recursive = TRUE, showWarnings = FALSE)
+
+  for (nm in names(funs)) {
+    fn <- funs[[nm]]
+    stopifnot(is.function(fn))
+
+    # deparse to text
+    txt <- paste0(nm, " <- ", paste(deparse(fn), collapse = "\n"))
+    out_file <- file.path(pkg_path, r_dir, paste0(nm, ".R"))
+    writeLines(txt, out_file)
+  }
+}
+```
+
+Then:
+
+```r
+funs <- readRDS("my_funs.rds")
+write_functions_to_package(funs, "~/path/to/codtools")
+```
+
+After that, you still need to add roxygen docs + `devtools::document()`.
+
+---
+
+## Good defaults for package metadata
+
+From the package root:
+
+```r
+usethis::use_mit_license("Your Name")
+usethis::use_readme_rmd()
+usethis::use_git()
+```
+
+usethis is built to automate these repetitive setup steps. ([Use This][5])
+
+---
+
+## Recommended structure for your specific project
+
+Given the functions you’ve been building (prep, model fitting, diagnostics, plotting), this layout is usually clean:
+
+* `R/prep_sales.R` — `prep_cod_sales`, date parsing, schema alignment
+* `R/model_fit.R` — `backward_p`, GAM wrappers, metrics
+* `R/diagnostics.R` — inlier flags, residual diagnostics, concurvity helpers
+* `R/tables.R` — `coef_table`, `safe_vif_kable`, kable styling
+* `R/plots.R` — plotting functions
+
+---
+
+## Quick note: don’t export everything
+
+Keep internal helpers unexported by omitting `@export`. Users still can use them internally, but your public API stays sane.
+
+---
+
+If you want, paste the names of the functions you consider “public” (the ones you actually want to call from Rmd), and I’ll suggest an `R/` file grouping + the minimal roxygen headers you’ll want for each.
+
+[1]: https://r-pkgs.org/workflow101.html?utm_source=chatgpt.com "4 Fundamental development workflows"
+[2]: https://usethis.r-lib.org/reference/create_package.html?utm_source=chatgpt.com "Create a package or project — create_package - usethis"
+[3]: https://roxygen2.r-lib.org/?utm_source=chatgpt.com "In-Line Documentation for R • roxygen2"
+[4]: https://r-pkgs.org/whole-game.html?utm_source=chatgpt.com "1 The Whole Game"
+[5]: https://usethis.r-lib.org/?utm_source=chatgpt.com "Automate Package and Project Setup • usethis"
+
+
+---
+
+
+
+---
+
+
+
+---
+
+
+
+---
+
+
+
+---
+
+
+
+---
+
+
+
+---
+
+
+
+
+
+
+
+

@@ -1,0 +1,2495 @@
+Model Trial I Notes
+
+Console input to install readr and all other tidyversings:
+install.packages("tidyverse")
+install.packages('data.table')
+installed.packages()
+install.packages('reticulate')
+install.packages('tidymodels')
+install.packages('magrittr')
+install.packages('janitor')
+install.packages(c('DBI', 'odbc'))
+
+reticulate::conda_list()
+reticulate::install_miniconda(path = miniconda_path(), update = TRUE, force = FALSE)
+reticulate::miniconda_path()
+
+https://rdrr.io/cran/reticulate/man/conda-tools.html
+
+conda_create(
+  envname = NULL,
+  packages = NULL,
+  ...,
+  forge = TRUE,
+  channel = character(),
+  environment = NULL,
+  conda = "auto",
+  python_version = miniconda_python_version(),
+  additional_create_args = character()
+)
+
+conda_install(
+  envname = NULL,
+  packages,
+  forge = TRUE,
+  channel = character(),
+  pip = FALSE,
+  pip_options = character(),
+  pip_ignore_installed = FALSE,
+  conda = "auto",
+  python_version = NULL,
+  additional_create_args = character(),
+  additional_install_args = character(),
+  ...
+)
+
+---
+
+In SPSS, “Exploratories” (more properly the **Explore** procedure, invoked via the **EXAMINE** command) is your one-stop exploratory data analysis tool.  It will, for each variable (and optionally by group), produce:
+
+* **Descriptive statistics** (N, mean, SD, min, max, quartiles)
+* **Distribution plots** (histograms, stem-and-leaf, boxplots)
+* **Normality tests** (e.g. Shapiro–Wilk)
+* **Outlier indicators** (via boxplot whiskers)
+* **Confidence intervals** for means, etc. ([ibm.com][1])
+
+A typical SPSS syntax snippet looks like:
+
+```spss
+EXAMINE VARIABLES=priceclass BY sresb_style
+  /PLOT=BOXPLOT STEMLEAF HISTOGRAM
+  /STATISTICS=DESCRIPTIVES
+  /CINTERVAL=95
+  /MISSING=PAIRWISE.
+```
+
+---
+
+### R equivalents
+
+There isn’t a single base-R command that does absolutely everything in one go, but you can compose the same steps very easily:
+
+```r
+# assuming your data.frame is df
+
+# 1. Descriptive stats
+summary(df$priceclass)
+
+# or, for a more complete table:
+# install.packages("psych")
+psych::describe(df$priceclass)
+
+# 2. Grouped summaries
+# install.packages("dplyr")
+library(dplyr)
+df %>%
+  group_by(sresb_style) %>%
+  summarise(
+    N      = n(),
+    Mean   = mean(priceclass, na.rm=TRUE),
+    SD     = sd(priceclass,   na.rm=TRUE),
+    Median = median(priceclass,na.rm=TRUE),
+    IQR    = IQR(priceclass,  na.rm=TRUE),
+    Min    = min(priceclass,   na.rm=TRUE),
+    Max    = max(priceclass,   na.rm=TRUE)
+  )
+
+# 3. Plots
+hist(df$priceclass)                              # histogram
+stem(df$priceclass)                              # stem-and-leaf
+boxplot(priceclass ~ sresb_style, data = df)     # boxplot by group
+
+# 4. Normality test
+shapiro.test(df$priceclass)
+
+# 5. Automated EDA reports (all in one)
+# install.packages(c("skimr","DataExplorer","summarytools"))
+skimr::skim(df)
+DataExplorer::create_report(df)
+summarytools::dfSummary(df)
+```
+
+With these pieces you replicate SPSS’s Explore output in R—either piecemeal with base functions or in one fell swoop with an EDA package.
+
+[1]: https://www.ibm.com/docs/SSLVMB_sub/statistics_reference_project_ddita/spss/base/syn_examine.html?utm_source=chatgpt.com "EXAMINE - IBM"
+
+..
+
+To reduce vertical length and **fit more columns horizontally** in an **HTML output** from R Markdown, here are several effective techniques:
+
+---
+
+## ✅ 1. **Use `kable()` or `datatable()` with horizontal scroll**
+
+### a) `knitr::kable()` + scrollable wrapper
+
+```r
+library(knitr)
+
+# Wrap your kable in a div with overflow-x: auto
+cat("<div style='overflow-x:auto;'>")
+kable(your_dataframe)
+cat("</div>")
+```
+
+This lets the table scroll horizontally rather than wrap or stack vertically.
+
+---
+
+### b) `DT::datatable()` (best for interactivity + scrollbars)
+
+```r
+library(DT)
+
+datatable(
+  your_dataframe,
+  options = list(scrollX = TRUE)
+)
+```
+
+This produces a slick, scrollable, column-squishing table with sorting and search.
+
+---
+
+## ✅ 2. **Rotate column headers (CSS)**
+
+If column names are wide but values are short, add this to your YAML or an inline style block:
+
+```yaml
+output: 
+  html_document:
+    css: styles.css
+```
+
+Then in `styles.css`:
+
+```css
+th {
+  transform: rotate(-45deg);
+  white-space: nowrap;
+}
+```
+
+Or inline:
+
+```html
+<style>
+th {
+  transform: rotate(-45deg);
+  white-space: nowrap;
+}
+</style>
+```
+
+---
+
+## ✅ 3. **Set a smaller font**
+
+Globally in YAML:
+
+```yaml
+output:
+  html_document:
+    css: styles.css
+```
+
+In `styles.css`:
+
+```css
+body {
+  font-size: 12px;
+}
+```
+
+Or locally in a chunk:
+
+```r
+kable(df) %>%
+  kableExtra::kable_styling(font_size = 10)
+```
+
+---
+
+## ✅ 4. **Reduce margins and padding**
+
+In `styles.css`:
+
+```css
+table {
+  padding: 0;
+  margin: 0;
+  font-size: 12px;
+  table-layout: fixed;
+  width: 100%;
+}
+```
+
+---
+
+## ✅ 5. **Transpose your data (for a small number of rows)**
+
+If you have few rows but many columns:
+
+```r
+t(df)  # transpose the dataframe
+```
+
+Then use `kable()` or `datatable()` on that.
+
+---
+
+### Summary
+
+| Goal                     | Best Option                     |
+| ------------------------ | ------------------------------- |
+| Scrollable wide tables   | `DT::datatable(scrollX=TRUE)`   |
+| Squeeze columns together | Smaller font + CSS tweaks       |
+| Prevent wrapping headers | `white-space: nowrap;` in CSS   |
+| Rotate headers           | `transform: rotate(...)` in CSS |
+| Transpose data           | Use `t(df)`                     |
+
+Let me know if you’d like a minimal working example with all of these combined.
+
+
+..
+
+When you need a true PDF rather than an HTML “print,” you essentially have two good paths:
+
+---
+
+## 1. Knit straight to PDF via LaTeX (`pdf_document`)
+
+The most reliable way is to let R Markdown generate a LaTeX‐based PDF. In your YAML header switch:
+
+```yaml
+output:
+  pdf_document:
+    latex_engine: xelatex    # or “pdflatex”/“lualatex” as you prefer
+    keep_tex: true           # (optional) to inspect the .tex file afterwards
+    toc: true                # (optional) add a table of contents
+    geometry: margin=1in     # adjust page‐margins
+```
+
+Then in your chunks use LaTeX-friendly tables (via **kableExtra** or **xtable**) and dial in:
+
+```r
+library(kableExtra)
+
+kable(df, format = "latex", booktabs = TRUE) %>%
+  kable_styling(
+    latex_options = c("hold_position", "scale_down")  # auto‐scale wide tables
+  )
+```
+
+### Tips for PDF tables
+
+* **`scale_down`** will shrink your table to fit the page width.
+* If you need **landscape** pages, wrap the table in a LaTeX environment:
+
+  ```r
+  cat("\\begin{landscape}")
+  kable(...) %>% …
+  cat("\\end{landscape}")
+  ```
+* Use `header_includes` in YAML to load packages, e.g.
+
+  ```yaml
+  header-includes:
+    - \usepackage{pdflscape}
+    - \usepackage{booktabs}
+    - \usepackage{tabularx}
+  ```
+
+That approach gives you full control over page size, fonts, margins, and reliably handles multi‐page tables (via `longtable` or `tabularx`).
+
+---
+
+## 2. Convert your HTML to PDF with a headless browser
+
+If you’ve already styled everything in your **html\_document** (with scrollable divs, CSS tweaks, etc.) and want a quick “print‐to‐PDF”:
+
+### a) **pagedown** (recommended)
+
+```r
+# Install if needed
+# install.packages("pagedown")
+
+pagedown::chrome_print(
+  input  = "report.html",
+  output = "report.pdf",
+  format = "A4"      # or "Letter"
+)
+```
+
+This uses Headless Chrome to render your HTML (including any CSS) and “print” it to PDF.
+
+### b) **webshot2**
+
+```r
+# install.packages("webshot2")
+webshot2::webshot(
+  url    = "report.html",
+  file   = "report.pdf",
+  delay  = 0.5,      # wait for JS/CSS
+  zoom   = 1.2,
+  vwidth = 992       # viewport width
+)
+```
+
+---
+
+### Which to choose?
+
+| Need…                                                            | Use…                        |
+| ---------------------------------------------------------------- | --------------------------- |
+| Precise control (margins, fonts, page breaks), LaTeX tables, TOC | **pdf\_document** (LaTeX)   |
+| “What you see in browser” → PDF (with CSS, scrollbars printed)   | **pagedown::chrome\_print** |
+
+If you’re already comfortable tweaking LaTeX, go with **pdf\_document**. If you’ve invested in HTML+CSS styling and just want a faithful printout, **pagedown** is your quickest route.
+
+..
+
+Great question! To analyze the distribution of **standardized residuals** using a frequency histogram and a smooth curve, you'll typically do the following in **R**:
+
+---
+
+## ✅ 1. Fit your model and extract standardized residuals
+
+Assuming a linear model:
+
+```r
+model <- lm(y ~ x1 + x2, data = df)
+
+# Standardized residuals (Z-score like)
+std_resid <- rstandard(model)
+```
+
+---
+
+## ✅ 2. Create a histogram with a normal curve overlay
+
+```r
+hist(std_resid, 
+     breaks = 20, 
+     freq = FALSE,   # plot density, not counts
+     col = "lightblue", 
+     main = "Histogram of Standardized Residuals",
+     xlab = "Standardized Residuals")
+
+# Add a normal curve (mean = 0, sd = 1)
+curve(dnorm(x, mean = 0, sd = 1), 
+      col = "red", 
+      lwd = 2, 
+      add = TRUE)
+```
+
+This shows whether your residuals are approximately normal — a core assumption of many linear models.
+
+---
+
+## ✅ 3. (Optional) Add kernel density estimate (your data's own shape)
+
+```r
+lines(density(std_resid), col = "darkgreen", lwd = 2)
+legend("topright", legend = c("Normal Curve", "KDE"),
+       col = c("red", "darkgreen"), lwd = 2)
+```
+
+This helps compare the theoretical normal curve to the **actual distribution** of your residuals.
+
+---
+
+### Summary:
+
+| Step           | Function                        |
+| -------------- | ------------------------------- |
+| Get residuals  | `rstandard()` or `resid()`      |
+| Histogram      | `hist(..., freq = FALSE)`       |
+| Normal curve   | `curve(dnorm(...), add = TRUE)` |
+| KDE (optional) | `lines(density(...))`           |
+
+---
+
+Let me know if you're using `ggplot2` and want to do the same with `geom_histogram()` and `stat_function()` — it's equally clean.
+
+..
+
+Here’s a systematic checklist for chasing down why your R lm() coefficients (and related stats) don’t match SPSS:
+
+---
+
+## 1. Verify you’re using the *exact* same data
+
+1. **Row count**
+
+   ```r
+   nrow(df)                # total rows in R
+   nobs(lm_model)          # rows used in the regression
+   ```
+
+   Compare with “N” in the SPSS regression output.
+2. **Missingness**
+
+   ```r
+   sapply(df[, c("y","x1","x2",…)], function(v) sum(is.na(v)))
+   ```
+
+   SPSS by default does *listwise* deletion.  R’s `lm()` default `na.action=na.omit` also does listwise, but if you ever used `na.exclude` or another policy the N can differ.
+
+---
+
+## 2. Confirm your model spec matches SPSS’s
+
+* **Formula**: check you’re regressing the same `y ~ x1 + x2 + …` without typos or extra interactions.
+* **Weights**: did you accidentally set `weights=` in R or a weight in SPSS?
+* **Transformations**: ensure any SPSS `COMPUTE log_x = LN(x)` or recodes were re-implemented identically in R before fitting.
+
+---
+
+## 3. Align your factor (categorical) coding
+
+By default R uses treatment contrasts with the *first* level as the reference. SPSS’s default is also dummy coding but often uses the *last* or *lowest numeric* level as reference.
+
+1. **Check your levels**
+
+   ```r
+   table(df$group)       # SPSS’s output will list your categories   
+   levels(df$group)      # R’s ordering
+   ```
+2. **Re-level in R** to match SPSS’s reference category:
+
+   ```r
+   df$group <- relevel(df$group, ref = "the_SPS S_base_level")
+   ```
+3. **Force R’s contrasts** (if SPSS used simple 0/1 dummies):
+
+   ```r
+   options(contrasts = c("contr.treatment","contr.poly"))
+   ```
+
+   Then re-fit your model.
+
+---
+
+## 4. Double-check intercept handling
+
+* R always includes an intercept by default. If SPSS used “no intercept” or you used `/NOINT` in SPSS, you must add `-1` or `0 +` to your formula in R:
+
+```r
+lm(y ~ x1 + x2 - 1, data = df)
+```
+
+---
+
+## 5. Compare parameter estimates & std errors side-by-side
+
+After fitting:
+
+```r
+modR <- lm(y ~ x1 + x2 + group, data = df)
+library(broom)
+rCoefs <- tidy(modR)                # R’s table
+# Copy SPSS’s coefficients table into a data.frame spssCoefs
+compare <- merge(rCoefs, spssCoefs, by="term", suffixes=c(".R",".SPSS"))
+print(compare)
+```
+
+Seeing them next to each other often reveals a systematic shift (e.g. if every slope is off by a constant factor, you may have missed scaling/centering).
+
+---
+
+## 6. Check the fit statistics
+
+* **R-squared**, **AIC**, **σ̂** etc.:
+
+```r
+summary(modR)$r.squared
+AIC(modR)
+summary(modR)$sigma
+```
+
+Compare to SPSS’s **R²**, **AIC** (you can compute AIC from SPSS’s SSE and N), and **Std. Error of the Estimate**.  If these match but your betas don’t, it’s almost certainly a contrast/data issue.
+
+---
+
+## 7. Turn on verbose step‐wise logs (if using `step()`)
+
+If you’re using `step()` to select predictors in R, run with
+
+```r
+step(full_mod, direction="backward", trace=1)
+```
+
+to see exactly which terms get dropped at each iteration—and confirm you started with the same full model as SPSS.
+
+---
+
+### Quick summary of the most common culprits
+
+1. **Different N** (due to missing-data handling)
+2. **Mis-specified formula** (extra/missing term or intercept)
+3. **Factor contrast/reference mismatch**
+4. **Un-reproduced transformations** (logs, scales)
+5. **Weights or case-weights** applied in one and not the other
+
+Walk through the steps above, and you’ll reliably pinpoint where R and SPSS are diverging. Once you’ve aligned data, formula, and contrasts, the coefficients should line up exactly.
+
+..
+
+5. (Alternate) Use olsrr for one‐line backward p-value
+
+If you’d rather avoid writing your own loop, the olsrr package has a function that does exactly this:
+
+install.packages("olsrr")
+library(olsrr)
+
+# pent = p-value to stay in (PIN), prem = p-value to remove (POUT)
+step_mod <- ols_step_backward_p(full_mod, 
+                               pent = 0.05, 
+                               prem = 0.10,
+                               details = TRUE)
+
+# The final model is in:
+step_mod$model
+summary(step_mod$model)
+
+ols_step_backward_p() will print each drop (like SPSS’s trace) and return an object whose $model is your final lm.
+
+..
+
+You can wrap that three–step pipeline into a single, reusable function that takes any data frame and any one of its columns and spits back the nicely transposed, label-free table. Here’s a minimal example using tidy-eval (the `{{ }}` “curly‐curly” operator) from **rlang**/**dplyr**:
+
+```r
+library(dplyr)
+library(janitor)
+
+make_t_freq <- function(data, variable, digits = 1) {
+  # data     : your data frame
+  # variable : an unquoted column name in data
+  # digits   : how many decimals for the percent
+  
+  # 1) build the basic tabyl, add % formatting and totals
+  tbl <- data %>%
+    tabyl({{ variable }}) %>%               # frequency table
+    adorn_pct_formatting(digits = digits) %>%  # "12.3%"
+    adorn_totals()                            # add a "Total" column
+  
+  # 2) transpose to get categories across the top
+  mat <- t(tbl)
+  
+  # 3) blank out the auto-generated 1,2,3… column names
+  colnames(mat) <- rep("", ncol(mat))
+  
+  # return as a matrix (prints nicely), or wrap in kable() downstream
+  mat
+}
+
+# ——— Example usage ———
+# Suppose your df has a column called ECF:
+res <- make_t_freq(my_df, ECF, digits = 1)
+print(res)
+```
+
+#### If you want to immediately render with **knitr::kable()** (say in an RMarkdown chunk):
+
+```r
+library(knitr)
+
+make_t_freq(my_df, ECF) %>%
+  kable(
+    format    = "latex",   # or "html"
+    booktabs  = TRUE,
+    caption   = "Frequencies of ECF"
+  )
+```
+
+Or, if you prefer the function itself to return a **kable** object:
+
+```r
+make_kable_freq <- function(data, variable, digits = 1, fmt = "latex", cap = NULL) {
+  mat <- make_t_freq(data, {{ variable }}, digits)
+  knitr::kable(mat, format = fmt, booktabs = TRUE, caption = cap)
+}
+
+# usage
+make_kable_freq(my_df, ECF, cap = "ECF Frequencies")
+```
+
+With these in your script you can now call `make_t_freq(df, ANY_COLUMN)` (or the kable‐returning wrapper) on any single variable you like, and get back that same transposed, label-free table every time.
+
+..
+
+You’ve got two very common use-cases here—an image just at the top of your first page (like a logo on your title), or stamped into the header of every page. Below are recipes for both **PDF** and **HTML** outputs.
+
+---
+
+## 1. Image at the start of the document
+
+### PDF or HTML
+
+Just drop a hidden code-chunk right after your YAML:
+
+````yaml
+---
+title: "My Analysis"
+author: "Elliot Dean"
+date: "`r format(Sys.Date(), '%-d %B %Y')`"
+output:
+  pdf_document: default
+  # or
+  # html_document: default
+---
+
+```{r logo, echo=FALSE, out.width='50%', fig.align='center'}
+knitr::include_graphics("path/to/your/logo.png")
+````
+
+That will render `logo.png` centered at the very top of your report, before the title.
+
+---
+
+## 2. Image in the header of **every** page
+
+### A) PDF (`pdf_document`)
+
+1. Put your logo (say `logo.png`) in the same folder as your `.Rmd`.
+2. Add these lines under your YAML’s `header-includes`:
+
+```yaml
+---
+title: "My Analysis"
+output:
+  pdf_document:
+    latex_engine: xelatex   # or pdflatex
+header-includes:
+  - \usepackage{graphicx}
+  - \usepackage{fancyhdr}
+  - \pagestyle{fancy}
+  - \fancyhf{}                                % clear defaults
+  - \fancyhead[L]{\includegraphics[height=1cm]{logo.png}}
+  - \renewcommand{\headrulewidth}{0pt}        % remove header line
+---
+```
+
+* `\fancyhead[L]{…}` places the logo flush left.
+* You can also use `\fancyhead[C]{…}` or `\fancyhead[R]{…}` for center/right.
+* Adjust `[height=...]` to fit your page.
+
+Every page (including the title page) will now carry your logo in the header.
+
+---
+
+### B) HTML (`html_document`)
+
+You can inject a fixed `<div>` into the `<body>` via raw HTML + CSS:
+
+```yaml
+---
+title: "My Analysis"
+output:
+  html_document:
+    css: styles.css   # optional, if you prefer an external stylesheet
+---
+
+<!-- this goes right below the YAML -->
+<style>
+  .fixed-header {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    background: white;
+    padding: 5px 0;
+    text-align: center;
+    z-index: 1000;
+  }
+  body { margin-top: 60px; }  /* make room for the header */
+</style>
+
+<div class="fixed-header">
+  <img src="logo.png" style="height:40px;"/>
+</div>
+```
+
+* `.fixed-header` will stay at the top of every screen/page when printed.
+* `body { margin-top: 60px; }` ensures your content isn’t hidden underneath.
+* Tweak `height`, `padding`, and `margin-top` to taste.
+
+---
+
+### Summary
+
+| Where          | PDF (`pdf_document`)                         | HTML (`html_document`)                    |
+| -------------- | -------------------------------------------- | ----------------------------------------- |
+| **First page** | `knitr::include_graphics()` chunk after YAML | Same chunk, it works in HTML too          |
+| **Every page** | `fancyhdr` in `header-includes`              | Fixed `<div>` + CSS in your document body |
+
+Pick the approach you need, adjust paths/sizes, and you’ll have your logo front and center—or on every page.
+
+...
+
+To get your logo **above the title** (or even in the page header) you can’t just drop a code‐chunk in the body, because R Markdown always renders the YAML title *before* your first chunk. Instead you need to inject the image *into* the document template. Here are two bullet-proof ways:
+
+---
+
+## 1. Image at the very top (before the title)
+
+### PDF output
+
+1. Create a tiny LaTeX include file, say `pre_body.tex`, next to your `.Rmd` with:
+
+   ```latex
+   \begin{center}
+     \includegraphics[height=1cm]{logo.png}
+   \end{center}
+   ```
+2. In your YAML, tell `pdf_document` to include it *before* the body:
+
+   ```yaml
+   ---
+   title: "My Report"
+   author: "Me"
+   output:
+     pdf_document:
+       includes:
+         before_body: pre_body.tex
+   ---
+   ```
+
+### HTML output
+
+1. Create `pre_body.html` containing:
+
+   ```html
+   <div style="text-align:center;margin-bottom:1em;">
+     <img src="logo.png" style="height:60px;" alt="Logo"/>
+   </div>
+   ```
+2. In your YAML:
+
+   ```yaml
+   ---
+   title: "My Report"
+   author: "Me"
+   output:
+     html_document:
+       includes:
+         before_body: pre_body.html
+   ---
+   ```
+
+Both of these inject your image *into* the template just **before** the title, so it truly sits at the top of page 1.
+
+---
+
+## 2. Image in the header of *every* page
+
+### PDF only (using fancyhdr)
+
+Add to your YAML:
+
+```yaml
+---
+output:
+  pdf_document:
+    latex_engine: xelatex
+    includes:
+      in_header: header.tex
+---
+```
+
+Then in `header.tex`:
+
+```latex
+\usepackage{graphicx}
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}                                 % clear default header/footer
+\fancyhead[L]{\includegraphics[height=1cm]{logo.png}}
+\renewcommand{\headrulewidth}{0pt}         % no line under header
+```
+
+That logo will appear in the left header on *every* page.
+
+### HTML only (fixed top banner)
+
+After your YAML (no extra files needed), drop:
+
+```html
+<style>
+.fixed-header{
+  position: fixed; top:0; left:0; right:0;
+  background:white; padding:5px; text-align:center;
+  z-index:1000;
+}
+body{margin-top:70px;}  /* push content below header */
+</style>
+<div class="fixed-header">
+  <img src="logo.png" style="height:40px;" alt="Logo"/>
+</div>
+```
+
+This will pin the image at the top of *every* rendered HTML page.
+
+---
+
+Pick the method that fits your output type and desired placement. Let me know if you need any tweaks!
+
+...
+
+To get a logo **truly above** your title (rather than after it), you need to tell the LaTeX or HTML template to render the image **inside** the title‐making routine. Here’s how to do that in each format:
+
+---
+
+## PDF (`pdf_document`)
+
+**1.** In your YAML, drop the normal `geometry:` etc., and add a custom `header-includes` block that **redefines** `\maketitle`:
+
+```yaml
+---
+title: "My Report"
+author: "Elliot Dean"
+date:   "`r format(Sys.Date(), '%-d %B %Y')`"
+output:
+  pdf_document:
+    latex_engine: xelatex
+header-includes:
+  - \usepackage{graphicx}
+  - \makeatletter
+  - \renewcommand{\maketitle}{
+      \begin{center}
+        % Logo above the title
+        \includegraphics[height=1.5cm]{logo.png}\\[1em]
+        {\LARGE\bfseries \@title \par}
+        \vskip 0.5em
+        {\large \@author \par}
+        {\small  \@date \par}
+        \vskip 1.5em
+      \end{center}
+    }
+  - \makeatother
+---
+```
+
+* `\renewcommand{\maketitle}{…}` replaces the default title block with one that first centers and prints your `logo.png`.
+* Adjust `height=...` and vertical skips (`\\[1em]`, `\vskip`) to taste.
+
+Now when you knit, LaTeX will run *your* `\maketitle`, logo and all, before printing the actual title text.
+
+---
+
+## HTML (`html_document`)
+
+Pandoc’s default HTML template prints the `<h1>` title before your `before_body` include. To put an image above the title you can either **inject raw HTML** at the top of the body *and* hide the default title, or better—**embed the image in your YAML title** itself:
+
+```yaml
+---
+title: |
+  <img src="logo.png" style="height:60px;" alt="Logo"/><br/>
+  My Report
+author: "Elliot Dean"
+date:   "`r format(Sys.Date(), '%-d %B %Y')`"
+output: 
+  html_document:
+    df_print: paged      # optional
+    includes:
+      in_header: null    # we won’t use a separate header file here
+---
+```
+
+* By using the **block scalar** (`|`) for `title:`, you can embed HTML.
+* The `<img>` appears *in place* of the normal title, so it shows above “My Report.”
+* You can still style via CSS or inline styles.
+
+If you prefer to keep the Markdown title and just pin a logo above it on *every* page, use a fixed `<div>` in your document body:
+
+```html
+<!-- put this immediately after the YAML -->
+<style>
+.fixed-logo {
+  position: fixed; top: 0; left: 0; right: 0;
+  background: white; padding: 5px;
+  text-align: center; z-index: 1000;
+}
+body { margin-top: 80px; }  /* adjust for logo height */
+</style>
+<div class="fixed-logo">
+  <img src="logo.png" style="height:50px;">
+</div>
+```
+
+This will float your logo at the very top of every HTML page, and push the content (including the title) down below it.
+
+---
+
+**Pick the snippet** that matches your output format, drop it into your Rmd’s YAML and (for HTML) top of the body, adjust the image path/size, and you’ll have the logo *above* your title every time.
+
+...
+
+library(tidymodels)
+
+lasso_spec <- linear_reg(
+  penalty = tune(),           # λ to tune
+  mixture = 1                 # 1 = LASSO
+) %>%
+  set_engine("glmnet")
+
+lasso_wf <- workflow() %>%
+  add_formula(y ~ .) %>%
+  add_model(lasso_spec)
+
+# 10-fold CV
+folds <- vfold_cv(df, v = 10)
+
+# tune over a grid of penalties
+penalty_grid <- grid_regular(penalty(), levels = 50)
+
+tuned <- tune_grid(
+  lasso_wf, 
+  resamples = folds,
+  grid      = penalty_grid,
+  control   = control_grid(save_pred = TRUE)
+)
+
+# best penalty
+best_pen <- select_best(tuned, "rmse")
+
+# finalize and fit
+final_mod <- finalize_workflow(lasso_wf, best_pen) %>%
+  fit(df)
+
+# coefficients
+pull_workflow_fit(final_mod)$fit$glmnet.fit %>%
+  coef(s = best_pen$penalty)
+
+*
+
+library(ggplot2)
+library(rlang)
+library(ggpmisc)    # for stat_regline_equation
+
+graphing <- function(data,
+                     x,
+                     y,
+                     z    = NULL,       # ← new optional mapping
+                     color= "black",    # ← now has a default
+                     xlab = NULL,
+                     ylab = NULL,
+                     title= NULL) {
+
+  xq <- enquo(x)
+  yq <- enquo(y)
+  zq <- enquo(z)
+
+  # detect whether z was actually supplied
+  use_z <- !quo_is_null(zq)
+
+  # build the base aes mapping
+  base_mapping <- if (use_z) {
+    aes(x = !!xq, y = !!yq, colour = !!zq)
+  } else {
+    aes(x = !!xq, y = !!yq)
+  }
+
+  p <- ggplot(data, base_mapping) +
+    geom_point() +
+    # for stat_smooth: if z is mapped, let it inherit; otherwise use fixed color
+    {
+      if (use_z) {
+        stat_smooth(method = "lm", se = FALSE)
+      } else {
+        stat_smooth(method = "lm", se = FALSE, colour = color)
+      }
+    } +
+    stat_regline_equation(
+      aes(label = paste(after_stat(eq.label),
+                        after_stat(adj.rr.label),
+                        sep = "~~~")),
+      label.x.npc = 0.2,
+      label.y.npc = 0.8
+    ) +
+    labs(x = xlab, y = ylab, title = title) +
+    theme_minimal()
+
+  p
+}
+
+.
+
+Of course. To add the time variables to your model and ensure they are kept, you simply need to include them in the `lm()` formula.
+
+However, it's important to use the correct dependent variable (`LN_PRICE`) for this approach, as explained below.
+
+### How to Include Time Variables in the Model
+
+To get coefficients for your time variables, you must model the **unadjusted sale price** (`LN_PRICE`), not the time-adjusted price (`LN_TASP`). This approach measures the impact of all variables, including time, simultaneously.
+
+```r
+# --- Create LN_PRICE ---
+# Make sure your modeling dataframe has the unadjusted log price
+df_model_ready <- df_model_ready %>%
+  mutate(LN_PRICE = log(saleprice))
+
+# --- Build the Model with Time Variables ---
+# Use LN_PRICE as the dependent variable
+model_with_time <- lm(LN_PRICE ~ LNSBLDSFINT + LN_LANDRATIO + GARAGE + FIREPLACE +
+                        # All other property characteristics...
+                        CLUSTER10 +
+                        # Add the time spline variables here
+                        MONTHS_6TO22 + MONTHS_23TO30,
+                      data = df_model_ready)
+
+# View the summary to see the coefficients
+summary(model_with_time)
+```
+
+-----
+
+### Important Methodological Note
+
+The workflow in the SPSS script you provided intentionally removes the time variables from the final model for a specific reason. [cite\_start]The goal is to create a model whose coefficients can be applied to properties that have not sold[cite: 412].
+
+The process is:
+
+1.  [cite\_start]**Find Time's Effect:** A preliminary model is run using the **unadjusted price** to find the coefficients for the time variables (`MONTHS_6TO22`, etc.)[cite: 383].
+2.  [cite\_start]**Adjust for Time:** These coefficients (rates) are used to calculate the Time Adjusted Sale Price (`TASP`), which represents what each property would have sold for at a single point in time[cite: 416].
+3.  [cite\_start]**Final Model:** The final regression is run using `LN_TASP` as the dependent variable but **excluding** the time variables[cite: 418]. This is because the effect of time has already been accounted for in the dependent variable itself.
+
+Including time variables as predictors for `LN_TASP` would be circular and statistically problematic, as `LN_TASP` is a direct function of those same time variables.
+
+
+.
+
+COMPUTE LN_SPPSF=LN(SPPSF). 
+ 
+REGRESSION 
+ /DEPENDENT=LN_SPPSF 
+ /METHOD=BACKWARD 
+ ARTERIAL 
+ SINGLE_FAMILY1STORY TO  HALF_DUPLEX2STORY 
+ SMALLEST TO LARGEST 
+ TWO_PLUS_BATHS TO POWDER_ROOM 
+ GOOD TO VERY_POOR_UNSOUND 
+ QABOVE_AVG TO QBELOW_AVG_POOR 
+ YB_PRE_1929 TO YB_POST_1961 
+ CRAWL SLAB 
+ LN_GARAGESPACES FIREPLACE 
+ HOT_WATER TO CENTRAL_AIR 
+MONTHS_6TO22 MONTHS_23TO30.
+.
+
+COMPUTE LN_SPPSF=LN(SPPSF). 
+ 
+REGRESSION 
+ /DEPENDENT=LN_SPPSF 
+ /METHOD=BACKWARD 
+ ARTERIAL + 
+ SINGLE_FAMILY1STORY + SINGLE_FAMILY2STORY + HALF_DUPLEX1STORY + HALF_DUPLEX2STORY + 
+ SMALLEST + SMALL + LARGE + LARGEST +
+ TWO_PLUS_BATHS + POWDER_ROOM + 
+ GOOD + FAIR + POOR + VERY_POOR_UNSOUND +
+ QABOVE_AVG TO QBELOW_AVG_POOR 
+ YB_PRE_1929 TO YB_POST_1961 
+ CRAWL SLAB 
+ LN_GARAGESPACES FIREPLACE 
+ HOT_WATER TO CENTRAL_AIR 
+MONTHS_6TO22 MONTHS_23TO30.
+.
+
+That “rows in use has changed” error plus the follow-on “na.exclude.default(): argument ‘object’ is missing” both stem from the same root: your stepwise routine is seeing a *different* set of rows when it refits smaller models, and then you tried to call `na.exclude()` with no object. The fix is to nail down your sample **before** you call `lm()` / `step()`, and let the model’s `na.action` handle the rest. Here’s a bullet-proof recipe:
+
+---
+
+### 1. Identify all variables in your full model
+
+```r
+# Suppose full_model_2 was defined like this:
+# full_model_2 <- lm(Y ~ X1 + X2 + X3 + X4, data = df)
+
+# Grab the formula
+f <- formula(full_model_2)
+
+# Get the variable names out of it
+vars <- all.vars(f)  
+# e.g. c("Y","X1","X2","X3","X4")
+```
+
+---
+
+### 2. Filter your data to complete cases *once*
+
+```r
+df_clean <- df[ complete.cases(df[ , vars ]), ]
+nrow(df_clean)  # make sure this is > 0 and matches what SPSS reported
+```
+
+This guarantees *every* sub-model sees exactly the same rows.
+
+---
+
+### 3. Re-fit your full model on the clean data, with `na.action` baked in
+
+```r
+full_model_clean <- lm(
+  f,
+  data      = df_clean,
+  na.action = na.omit   # now the model object remembers to omit NAs
+)
+```
+
+You’ll never need to call `na.exclude()` manually, so you won’t get that “argument missing” error.
+
+---
+
+### 4. Run stepwise on the cleaned, NA-omitting model
+
+```r
+reduced_model <- stats::step(
+  full_model_clean,
+  direction = "backward",
+  trace     = 0          # silent mode if you prefer
+)
+```
+
+Since `full_model_clean` was fit on a fixed, NA-free dataset, **all** calls to `update()` inside `step()` will use the same rows, and the “number of rows has changed” error goes away.
+
+---
+
+### 5. (Optional) Check that every sub-model uses the same `n`
+
+You can spot-check:
+
+```r
+nobs(full_model_clean)               # say, 120
+mod2 <- update(full_model_clean, . ~ . - X3)
+nobs(mod2)                           # should also be 120
+```
+
+If those match, you’re safe to proceed.
+
+---
+
+#### TL;DR
+
+1. **Pre-filter** your data once with `complete.cases()` on *all* model vars.
+2. **Refit** with `lm(..., na.action = na.omit)`.
+3. **Call** `step()` on that model.
+
+That will eliminate both the row-count mismatch error and the stray `na.exclude()` invocation.
+
+.
+Easiest: use **Pandoc footnotes** right in your R Markdown text. They work in HTML, PDF, and Word.
+
+### Inline footnote
+
+```markdown
+Here’s a sentence with a footnote.^[This is the footnote text.]
+```
+
+### Reference-style footnote
+
+```markdown
+Some text with a labeled footnote.[^method]
+
+[^method]: Full explanation of the method goes here.
+```
+
+You can put inline R in a footnote, too:
+
+```markdown
+The mean is stable.^[Mean = `r round(mean(x), 2)`.]
+```
+
+### PDF-only alternative (LaTeX)
+
+If you’re knitting **only to PDF**, you can also use:
+
+```markdown
+This is another sentence.\footnote{LaTeX-style footnote.}
+```
+
+### Footnotes for tables
+
+For `kable` tables, use `kableExtra`:
+
+```r
+library(kableExtra)
+kable(head(iris)) |>
+  footnote(general = "Species are as provided in the dataset.")
+```
+
+That’s it—drop one of those patterns into your Rmd where you want the footnote.
+
+https://babichmorrowc.github.io/post/changing-fonts-in-rmarkdown-pdfs/
+
+
+.
+
+Great Qs—here’s a tidy, drop-in way to do both.
+
+## 1) Control the number of digits on point labels
+
+Easiest is to **format the label column before mapping** using `scales::number()` (or `label_number()`):
+
+```r
+library(dplyr)
+library(scales)
+
+# show 2 decimals
+df <- df %>%
+  mutate(label_fmt = number(your_label_var, accuracy = 0.01))  # digits = 2
+# examples:
+# accuracy = 0.001  -> 3 decimals
+# accuracy = 1      -> no decimals
+# number_format(accuracy = 0.01)(x) works too
+```
+
+Then in ggplot:
+
+```r
+ggplot(df, aes(x, y)) +
+  geom_point() +
+  geom_text(aes(label = label_fmt), size = 2.5, vjust = -0.6, check_overlap = TRUE)
+```
+
+(If you prefer base formatting: `mutate(label_fmt = sprintf("%.3f", your_label_var))`.)
+
+---
+
+## 2) Color points by “most to least significant”
+
+You need a **numeric score** to represent significance. Common choices:
+
+* If you have **p-values** → use `-log10(p)` (larger = more significant).
+* If you have **t/z stats or effects** → use `abs(stat)` (larger = more significant).
+* If you have **residuals** → use `abs(standardized_residual)`.
+
+Examples:
+
+```r
+# A) p-values present
+df <- df %>% mutate(sig = -log10(p_value))  # higher = more significant
+
+# B) t-stat present
+df <- df %>% mutate(sig = abs(t_stat))      # higher = more significant
+
+# C) make & use standardized residuals
+#   lm_fit <- lm(y ~ x, data = df)
+#   df <- df %>% mutate(sig = abs(rstandard(lm_fit)))
+```
+
+Then map `sig` to color:
+
+```r
+library(ggplot2)
+
+ggplot(df, aes(x, y, colour = sig)) +
+  geom_point() +
+  scale_colour_viridis_c(option = "C", direction = 1, name = "Significance") +
+  theme_minimal()
+```
+
+Tip: If you want “most significant = hottest color”, keep the default direction for `-log10(p)` or `abs(stat)`. If your score is reversed, add `direction = -1`.
+
+---
+
+## Bonus: fold both into your `graphing()` helper
+
+```r
+library(ggplot2)
+library(rlang)
+library(dplyr)
+library(scales)
+
+graphing <- function(data, x, y,
+                     z = NULL,                  # optional categorical mapping
+                     label = NULL,              # column to print by each point
+                     label_digits = 2,          # how many decimals on labels
+                     signif_by = NULL,          # numeric column to color by
+                     signif_transform = c("auto","neglog10","abs","identity"),
+                     color = "black",
+                     xlab = NULL, ylab = NULL, title = NULL) {
+
+  signif_transform <- match.arg(signif_transform)
+
+  xq <- enquo(x); yq <- enquo(y)
+  zq <- enquo(z); lq <- enquo(label); sq <- enquo(signif_by)
+
+  use_z <- !quo_is_null(zq)
+  use_l <- !quo_is_null(lq)
+  use_s <- !quo_is_null(sq)
+
+  df <- data
+
+  # format labels if requested
+  if (use_l) {
+    acc <- 10^(-label_digits)
+    df <- df %>% mutate(.label_fmt = number(!!lq, accuracy = acc))
+  }
+
+  # build significance score if requested
+  if (use_s) {
+    df <- df %>%
+      mutate(
+        .sig_raw = !!sq,
+        .sig = dplyr::case_when(
+          signif_transform == "neglog10" ~ -log10(.sig_raw),
+          signif_transform == "abs"      ~ abs(.sig_raw),
+          TRUE                           ~ .sig_raw   # "auto" or "identity"
+        )
+      )
+    # auto: if it *looks* like p-values in (0,1], switch to -log10
+    if (signif_transform == "auto") {
+      rng <- range(df$.sig_raw, na.rm = TRUE)
+      if (rng[1] >= 0 && rng[2] <= 1) df$.sig <- -log10(df$.sig_raw)
+    }
+  }
+
+  # choose mapping: significance overrides z if both given
+  aes_base <- if (use_s) {
+    aes(x = !!xq, y = !!yq, colour = .sig)
+  } else if (use_z) {
+    aes(x = !!xq, y = !!yq, colour = !!zq)
+  } else {
+    aes(x = !!xq, y = !!yq)
+  }
+
+  p <- ggplot(df, aes_base) +
+    geom_point() +
+    { if (use_z || use_s) stat_smooth(method = "lm", se = FALSE)
+      else                 stat_smooth(method = "lm", se = FALSE, colour = color) } +
+    { if (use_l) geom_text(aes(label = .label_fmt), size = 2.5, vjust = -0.6, check_overlap = TRUE) } +
+    labs(x = xlab, y = ylab, title = title) +
+    theme_minimal()
+
+  if (use_s) {
+    p <- p + scale_colour_viridis_c(name = "Significance")
+  }
+
+  p
+}
+```
+
+**Usage examples**
+
+```r
+# 2 decimals on labels
+graphing(df, x, y, label = y, label_digits = 2)
+
+# Color by -log10(p) automatically, with tiny labels
+graphing(df, x, y, label = y, label_digits = 2, signif_by = p_value)
+
+# Color by abs(t-stat), keep a fixed smooth color
+graphing(df, x, y, label = y, signif_by = t_stat, signif_transform = "abs", color = "grey30")
+```
+
+This gives you fine control over label precision and a clear, continuous color scale for “most ↔ least significant.”
+
+
+
+.
+Gotcha—when two time-separated sales datasets give very different (R^2) with “the same” predictors, it usually means the *data generating process* changed (mix, seasonality, pricing regime, promo cadence, inflation, etc.), or the *data quality/scale* differs (units, missingness, range restriction). Below is a pragmatic EDA playbook with tidyverse/tidymodels code you can paste in.
+
+---
+
+# 0) Align the two datasets first
+
+```r
+library(tidyverse); library(lubridate)
+
+# assume salesA, salesB
+clean_cols <- function(df) {
+  df %>%
+    janitor::clean_names() %>%
+    mutate(across(where(is.character), ~str_trim(.x))) %>%
+    mutate(date = as_date(date))                      # <- adapt
+}
+
+A <- clean_cols(salesA) %>% mutate(period = "A")
+B <- clean_cols(salesB) %>% mutate(period = "B")
+
+# Ensure same factor levels for categoricals
+cats <- c("make","model","channel","region")          # <- adapt
+levels_union <- function(a,b) union(levels(a), levels(b))
+AB <- bind_rows(
+  A %>% mutate(across(all_of(cats), as.factor)),
+  B %>% mutate(across(all_of(cats), as.factor))
+) %>%
+  mutate(across(all_of(cats), ~forcats::fct_expand(.x, !!!(map(set_names(cats), ~levels(AB[[.x]]))))))
+```
+
+If currency/price is involved, **deflate/normalize**:
+
+```r
+# e.g., adjust revenue by CPI index (cpi_year provided)
+AB <- AB %>% mutate(revenue_real = revenue / cpi_index)
+```
+
+---
+
+# 1) Data quality & shape
+
+```r
+skimr::skim(AB)                              # missingness, ranges
+AB %>% count(period)                         # sample sizes
+AB %>% summarise(across(where(is.numeric), ~sum(is.na(.))/n())) # NA rates
+AB %>% summarise(across(where(is.numeric), ~n_distinct(.)))     # cardinality
+```
+
+Check **duplicates** & **zero variance**:
+
+```r
+AB %>% count(period, id) %>% filter(n>1)     # potential dup keys
+recipes::check_cols(AB)                      # structure sanity
+```
+
+---
+
+# 2) Target distribution & scale differences
+
+```r
+ggplot(AB, aes(revenue_real, fill = period)) +
+  geom_density(alpha = .3) +
+  scale_x_continuous(labels = scales::comma) +
+  theme_minimal()
+
+AB %>% group_by(period) %>%
+  summarise(n=n(), mean=mean(revenue_real), sd=sd(revenue_real), med=median(revenue_real))
+```
+
+A much lower SD in one period can depress achievable (R^2).
+
+---
+
+# 3) Univariate & bivariate with the target
+
+```r
+num_vars <- AB %>% select(where(is.numeric), -revenue_real) %>% names()
+
+# correlations by period
+cor_tbl <- AB %>%
+  group_by(period) %>%
+  summarise(across(all_of(num_vars),
+                   ~cor(.x, revenue_real, use="pairwise.complete.obs"), .names="{.col}")) %>%
+  pivot_longer(-period, names_to="predictor", values_to="cor")
+
+# top drivers by period
+cor_tbl %>% group_by(period) %>% slice_max(abs(cor), n=10)
+
+# categorical lift charts
+AB %>% group_by(period, channel) %>%
+  summarise(rev=mean(revenue_real), .groups="drop") %>%
+  ggplot(aes(channel, rev, fill=period)) + geom_col(position="dodge") + coord_flip()
+```
+
+---
+
+# 4) Multicollinearity & design matrix sanity
+
+```r
+library(performance)
+fitA <- lm(revenue_real ~ ., data = A %>% select(revenue_real, all_of(num_vars), all_of(cats)))
+fitB <- lm(revenue_real ~ ., data = B %>% select(revenue_real, all_of(num_vars), all_of(cats)))
+
+check_collinearity(fitA)  # VIFs
+check_collinearity(fitB)
+```
+
+Huge VIF changes between periods can swing coefficients and (R^2).
+
+---
+
+# 5) Drift between periods (why the models differ)
+
+**Numeric drift** (KS / PSI); **categorical drift** (chi-sq):
+
+```r
+# KS for numeric predictors
+ks_num <- map_dfr(num_vars, ~{
+  xA <- A[[.x]]; xB <- B[[.x]]
+  tibble(var = .x, ks = suppressWarnings(ks.test(xA, xB)$statistic))
+})
+
+# PSI helper
+psi_vec <- function(a, b, bins = 10) {
+  qa <- quantile(a, probs = seq(0,1,length.out=bins+1), na.rm=TRUE)
+  cutA <- cut(a, qa, include.lowest=TRUE); cutB <- cut(b, qa, include.lowest=TRUE)
+  pA <- prop.table(table(cutA)); pB <- prop.table(table(cutB))
+  sum((pA - pB) * log((pA + 1e-12)/(pB + 1e-12)))
+}
+psi_num <- map_dfr(num_vars, ~tibble(var=.x, psi = psi_vec(A[[.x]], B[[.x]])))
+
+# Categorical drift
+chisq_cat <- map_dfr(cats, ~{
+  t <- table(A[[.x]], B[[.x]])
+  tibble(var = .x, chisq_p = suppressWarnings(chisq.test(t)$p.value))
+})
+
+ks_num %>% arrange(desc(ks))
+psi_num %>% arrange(desc(psi))
+chisq_cat %>% arrange(chisq_p)
+```
+
+PSI > ~0.2 suggests meaningful shift.
+
+---
+
+# 6) Pooled vs. split models; structural break test
+
+Fit one model with **period interactions**:
+
+```r
+fit_pool <- lm(revenue_real ~ (.)*period,
+               data = AB %>% select(revenue_real, all_of(num_vars), all_of(cats), period))
+summary(fit_pool)
+```
+
+Run a **Chow test** (structural break). A simple proxy with `lmtest::waldtest()`:
+
+```r
+library(lmtest)
+fit_no_int <- lm(revenue_real ~ . + period,
+                 data = AB %>% select(revenue_real, all_of(num_vars), all_of(cats), period))
+waldtest(fit_no_int, fit_pool)  # significant => relationships changed across time
+```
+
+**Cross-prediction** to gauge stability:
+
+```r
+predA_onB <- yardstick::rsq_vec(truth = B$revenue_real,
+                                estimate = predict(fitA, newdata=B))
+predB_onA <- yardstick::rsq_vec(truth = A$revenue_real,
+                                estimate = predict(fitB, newdata=A))
+c(predA_onB = predA_onB, predB_onA = predB_onA)
+```
+
+Large asymmetry confirms drift or extrapolation.
+
+---
+
+# 7) Residual diagnostics (per period)
+
+```r
+broom::augment(fitA) %>%
+  ggplot(aes(.fitted, .resid)) + geom_point(alpha=.5) + geom_hline(yintercept=0,lty=2) +
+  labs(title="Residuals vs Fitted (Period A)")
+
+performance::check_heteroscedasticity(fitA)
+performance::check_outliers(fitA)
+```
+
+If heteroscedastic, consider log(target) or robust regression.
+
+---
+
+# 8) Transformations & feature engineering that help stability
+
+* Log/Box-Cox/Yeo–Johnson on skewed numeric predictors.
+* Normalize by exposure (per store/day/population).
+* Explicit **seasonality**: month, dow, week, holiday flags.
+* **Promo features**: promo depth, duration, days since/til promo.
+* **Price architecture**: price, discount %, competitor price, price index.
+* **Hierarchy**: product group / region random effects (mixed models) if structure changed.
+
+Example with recipes:
+
+```r
+library(tidymodels)
+
+rec <- recipe(revenue_real ~ ., data = AB) %>%
+  step_rm(id, date) %>%                                 # adapt
+  step_novel(all_nominal_predictors()) %>%
+  step_other(all_nominal_predictors(), threshold = 0.01) %>%
+  step_impute_median(all_numeric_predictors()) %>%
+  step_yeo_johnson(all_numeric_predictors()) %>%
+  step_dummy(all_nominal_predictors(), one_hot=TRUE) %>%
+  step_zv(all_predictors())
+```
+
+---
+
+# 9) Compare coefficient stability & importance
+
+```r
+coefA <- broom::tidy(fitA) %>% transmute(term, estA = estimate)
+coefB <- broom::tidy(fitB) %>% transmute(term, estB = estimate)
+coef_comp <- full_join(coefA, coefB, by="term") %>%
+  filter(term != "(Intercept)")
+ggplot(coef_comp, aes(estA, estB, label = term)) +
+  geom_abline(slope=1, intercept=0, lty=2) +
+  geom_point() + ggrepel::geom_text_repel(size=2.6) +
+  labs(title="Coefficient stability: Period A vs B",
+       x="Estimate (A)", y="Estimate (B)") +
+  theme_minimal()
+```
+
+Big deviations from the diagonal show where relationships changed.
+
+---
+
+# 10) Robust/regularized alternatives
+
+If plain OLS is unstable across time:
+
+* **Elastic net** stabilizes with correlated predictors:
+
+```r
+spec <- linear_reg(penalty = tune(), mixture = tune()) %>% set_engine("glmnet")
+wf   <- workflow() %>% add_recipe(rec) %>% add_model(spec)
+folds <- vfold_cv(AB, v=5, strata = period)  # stratify by time block
+params <- parameters(wf)
+grid   <- dials::grid_space_filling(params, size = 40)
+res    <- tune_grid(wf, resamples = folds, grid = grid, metrics = metric_set(rmse, rsq))
+select_best(res, "rmse")
+```
+
+* **Mixed-effects** if hierarchical (e.g., product/region random intercepts):
+
+```r
+lme4::lmer(revenue_real ~ price + promo + (1|product_id) + (1|region), data = AB)
+```
+
+---
+
+## Why (R^2) differs a lot across periods (common culprits)
+
+* **Target variance** differs (range restriction); same MAE, worse (R^2).
+* **Feature drift** (mix of makes/models/channels changed).
+* **Price/promo regimes** changed (different elasticities).
+* **New categorical levels** unseen in the earlier period.
+* **Measurement/units** changed (e.g., gross vs net, pre/post tax).
+* **Seasonality** or macro shocks (holidays, lockdowns) missing from the model.
+
+---
+
+### Minimal “triage” checklist
+
+1. Align schema/units; deflate prices.
+2. Look at target SD per period.
+3. Compare top correlations & PSI; flag biggest drifts.
+4. Fit pooled model with period interactions; run Chow/Wald test.
+5. Cross-predict A→B and B→A.
+6. Add seasonality/promo features; consider log transforms.
+7. If still unstable, move to elastic net or mixed effects.
+
+If you paste your predictor list and a quick summary of drift stats (e.g., top 5 PSI variables), I can suggest targeted features or transformations to close the gap in (R^2).
+
+
+.
+You’re passing a **workflow** to `parameters()`—that function expects a **model spec**/**recipe step(s)**, not a workflow. Use one of these fixes:
+
+## Option 1 — Build the parameter set from the **model spec**
+
+```r
+library(dials)
+library(tune)
+
+spec_xgb <- boost_tree(
+  mode = "regression",
+  trees          = tune(),
+  tree_depth     = tune(),
+  learn_rate     = tune(),
+  loss_reduction = tune(),
+  min_n          = tune(),
+  mtry           = tune(),
+  sample_size    = tune()
+) %>% set_engine("xgboost")
+
+# If you need data-aware ranges (e.g., mtry), finalize after making the set:
+pset <- parameters(spec_xgb) %>% update(
+  trees          = trees(c(300, 3000)),
+  tree_depth     = tree_depth(c(2, 12)),
+  learn_rate     = learn_rate(c(-4, -1)),
+  loss_reduction = loss_reduction(c(-6, 3)),
+  min_n          = min_n(c(1, 40)),
+  sample_size    = sample_prop(c(0.5, 1.0)),
+  mtry           = finalize(mtry(), train)  # uses training data
+)
+```
+
+## Option 2 — Extract tunables **from a workflow**
+
+```r
+library(tune)
+
+wf_xgb <- workflow() %>% add_recipe(rec_xgb) %>% add_model(spec_xgb)
+
+pset <- extract_parameter_set_dials(wf_xgb) %>% update(
+  trees          = trees(c(300, 3000)),
+  tree_depth     = tree_depth(c(2, 12)),
+  learn_rate     = learn_rate(c(-4, -1)),
+  loss_reduction = loss_reduction(c(-6, 3)),
+  min_n          = min_n(c(1, 40)),
+  sample_size    = sample_prop(c(0.5, 1.0)),
+  mtry           = finalize(mtry(), train)
+)
+```
+
+### Why the error?
+
+`parameters()` creates a dials parameter set from **specs/steps**. A `workflow` is a container; use `tune::extract_parameter_set_dials()` if you’ve already built the workflow.
+
+> Tip: ensure you’ve loaded `tune`/`dials` (`library(tune); library(dials)`), or call with namespace, e.g. `tune::extract_parameter_set_dials(wf_xgb)`.
+
+.
+```{r chk2, eval = FALSE}
+#df |> distinct(SRESB_FIREPLACE)
+df |>                                   # CROSSTABS Sresb_style BY Spropclass | Line 71
+  tabyl(SRESB_STYHGT, SRESB_STYLE) |> adorn_totals(c("row","col")) |>
+  adorn_percentages("row") |> adorn_pct_formatting(digits = 1) |> adorn_ns(position = "front")
+```
+.
+ips / gotchas
+
+To keep row alignment (incl. rows dropped for NAs), fit with na.action = na.exclude; then predict()/augment() will return a vector aligned to the original data (dropped rows get NA).
+
+If your model was fit on log price, back-transform before building residuals you care about at dollar scale:
+
+.
+# fit the full model first (lm required)
+modtime <- lm(formula_time, data = df)
+
+mod_time <- ols_step_backward_p(
+  modtime,
+  p_val = 0.1,       # equivalent idea to your p_out
+  details = TRUE,    # verbose-ish: prints regression at each step
+  progress = TRUE    # shows selection progress
+)
+
+# final selected model
+#mod_time$model
+
+# selection metrics table
+#mod_time$metrics
+
+.
+```{r}
+
+df %>%
+  mutate(saledate_parsed = as.Date(saledate)) %>%
+  summarise(
+    n = n(),
+    na_months = sum(is.na(months)),
+    na_saledate = sum(is.na(saledate)),
+    bad_parse = sum(!is.na(saledate) & is.na(saledate_parsed)),
+    na_months_and_bad_date = sum(is.na(months) & is.na(saledate_parsed))
+  )
+
+```
+
+.
+Yes — you can save **multiple functions** together, and whether you use **`.RData`** or **`.rds`** mainly depends on how you want to load them later.
+
+## The two formats (what’s different)
+
+### `.rds` (recommended most of the time)
+
+* Saves **one R object** (but that object can be a *list* containing many functions).
+* You load it with `readRDS()` and **assign it to a name**.
+* Nice because it **doesn’t dump objects into your global environment** unexpectedly.
+
+### `.RData` / `.rda`
+
+* Saves **one or more objects by name** into a file.
+* You load it with `load()` and the objects reappear in your environment **with their original names** (or into a specified environment).
+* Good for “workspace-like” bundles, but easier to accidentally overwrite objects.
+
+---
+
+## Option A: Save multiple functions in one `.rds` (best practice)
+
+### 1) Bundle functions into a list
+
+```r
+funs <- list(
+  model_metrics_A = model_metrics_A,
+  coef_table      = coef_table
+)
+```
+
+### 2) Save and load
+
+```r
+saveRDS(funs, file = "my_functions.rds")
+
+funs2 <- readRDS("my_functions.rds")
+funs2$model_metrics_A(mod_base)
+funs2$coef_table(mod_base)
+```
+
+### If you want them as “regular” functions after loading
+
+```r
+list2env(readRDS("my_functions.rds"), envir = .GlobalEnv)
+# Now you can call:
+model_metrics_A(mod_base)
+coef_table(mod_base)
+```
+
+(If you prefer not to pollute `.GlobalEnv`, you can load them into a dedicated environment—see below.)
+
+---
+
+## Option B: Save multiple functions in an `.RData` file
+
+```r
+save(model_metrics_A, coef_table, file = "my_functions.RData")
+```
+
+Load them back:
+
+```r
+load("my_functions.RData")
+model_metrics_A(mod_base)
+coef_table(mod_base)
+```
+
+### Safer `.RData` loading: load into an environment
+
+This avoids clobbering objects in your global env:
+
+```r
+fn_env <- new.env(parent = emptyenv())
+load("my_functions.RData", envir = fn_env)
+
+fn_env$model_metrics_A(mod_base)
+fn_env$coef_table(mod_base)
+```
+
+---
+
+## Which should you use?
+
+* Use **`.rds`** if you want *explicit* loading and fewer side effects (my default recommendation).
+* Use **`.RData`** if you want to save multiple named objects and restore them by name (or into an env).
+
+---
+
+## One more practical tip (for long-term projects)
+
+If these are functions you’ll use repeatedly, the most robust workflow is to put them in a plain text file like `R/functions.R` and then:
+
+```r
+source("R/functions.R")
+```
+
+or, even better, make a tiny internal package. But for quick sharing and reuse, `.rds`/`.RData` is totally fine.
+
+If you tell me whether you want to load them into the global environment automatically or keep them namespaced (like `funs$coef_table()`), I can suggest the cleanest pattern for your setup.
+
+
+.
+
+# HELPERS # SPSS-like frequency table
+freq_tbl <- function(df, var) {
+  var <- enquo(var)
+  df %>%
+    count(!!var, name = "n") %>%
+    mutate(percent = n / sum(n))
+}
+
+# SPSS-like MEANS stats
+means_tbl <- function(df, var) {
+  var <- enquo(var)
+  df %>%
+    summarise(
+      n      = sum(!is.na(!!var)),
+      mean   = mean(!!var, na.rm = TRUE),
+      median = median(!!var, na.rm = TRUE),
+      min    = min(!!var, na.rm = TRUE),
+      max    = max(!!var, na.rm = TRUE),
+      range  = max - min
+    )
+}
+
+.
+```{r oldecf, eval=FALSE}
+# 20) ECF binaries (as in SPSS) # Base: 3R319 in SPSS comments
+df <- df %>%					
+	mutate(				
+		ecf3R303	 = if_else(secf == "3R303", 1L, 0L),	ecf3R301	 = if_else(secf == "3R301", 1L, 0L),
+		ecf5R502	 = if_else(secf == "5R502", 1L, 0L),	ecf3R304	 = if_else(secf == "3R304", 1L, 0L),
+		ecf6R607	 = if_else(secf == "6R607", 1L, 0L),	ecf5R506	 = if_else(secf == "5R506", 1L, 0L),
+		ecf2R227	 = if_else(secf == "2R227", 1L, 0L),	ecf5R538	 = if_else(secf == "5R538", 1L, 0L),
+		ecf6R617	 = if_else(secf == "6R617", 1L, 0L),	ecf5R504	 = if_else(secf == "5R504", 1L, 0L),
+		ecf5R501	 = if_else(secf == "5R501", 1L, 0L),	ecf5R521	 = if_else(secf == "5R521", 1L, 0L),
+		ecf5R523	 = if_else(secf == "5R523", 1L, 0L),	ecf2R225	 = if_else(secf == "2R225", 1L, 0L),
+		ecf6R604	 = if_else(secf == "6R604", 1L, 0L),	ecf2R228	 = if_else(secf == "2R228", 1L, 0L),
+		ecf7R724	 = if_else(secf == "7R724", 1L, 0L),	ecf3R316	 = if_else(secf == "3R316", 1L, 0L),
+		ecf7R719	 = if_else(secf == "7R719", 1L, 0L),	ecf3R315	 = if_else(secf == "3R315", 1L, 0L),
+		ecf7R718	 = if_else(secf == "7R718", 1L, 0L),	ecf3R314	 = if_else(secf == "3R314", 1L, 0L),
+		ecf5R534	 = if_else(secf == "5R534", 1L, 0L),	ecf2R226	 = if_else(secf == "2R226", 1L, 0L),
+		ecf4R402	 = if_else(secf == "4R402", 1L, 0L),	ecf6R602	 = if_else(secf == "6R602", 1L, 0L),
+		ecf4R403	 = if_else(secf == "4R403", 1L, 0L),	ecf3R326	 = if_else(secf == "3R326", 1L, 0L),
+		ecf5R533	 = if_else(secf == "5R533", 1L, 0L),	ecf6R615	 = if_else(secf == "6R615", 1L, 0L),
+		ecf6R618	 = if_else(secf == "6R618", 1L, 0L),	ecf4R417	 = if_else(secf == "4R417", 1L, 0L),
+		ecf4R413	 = if_else(secf == "4R413", 1L, 0L),	ecf3R325	 = if_else(secf == "3R325", 1L, 0L),
+		ecf4R415	 = if_else(secf == "4R415", 1L, 0L),	ecf4R419	 = if_else(secf == "4R419", 1L, 0L),
+		ecf4R409	 = if_else(secf == "4R409", 1L, 0L),	ecf4R410	 = if_else(secf == "4R410", 1L, 0L),
+		ecf6R611	 = if_else(secf == "6R611", 1L, 0L),	ecf3R323	 = if_else(secf == "3R323", 1L, 0L),
+		ecf4R408	 = if_else(secf == "4R408", 1L, 0L),	ecf4R404	 = if_else(secf == "4R404", 1L, 0L),
+		ecf4R406	 = if_else(secf == "4R406", 1L, 0L),	ecf3R319	 = if_else(secf == "3R319", 1L, 0L),
+		ecf3R321	 = if_else(secf == "3R321", 1L, 0L),	ecf4R407	 = if_else(secf == "4R407", 1L, 0L),
+		ecf4R411	 = if_else(secf == "4R411", 1L, 0L),	ecf4R414	 = if_else(secf == "4R414", 1L, 0L),
+		ecf4R405	 = if_else(secf == "4R405", 1L, 0L),	ecf6R613	 = if_else(secf == "6R613", 1L, 0L),
+		ecf3R320	 = if_else(secf == "3R320", 1L, 0L),	ecf1R123	 = if_else(secf == "1R123", 1L, 0L),
+		ecf1R116	 = if_else(secf == "1R116", 1L, 0L),	ecf1R108	 = if_else(secf == "1R108", 1L, 0L),
+		ecf1R109	 = if_else(secf == "1R109", 1L, 0L),	ecf2R203	 = if_else(secf == "2R203", 1L, 0L),
+		ecf4R401	 = if_else(secf == "4R401", 1L, 0L),	ecf4R412	 = if_else(secf == "4R412", 1L, 0L),
+		ecf7R705	 = if_else(secf == "7R705", 1L, 0L),	ecf7R704	 = if_else(secf == "7R704", 1L, 0L),
+		ecf1R103	 = if_else(secf == "1R103", 1L, 0L),	ecf2R222	 = if_else(secf == "2R222", 1L, 0L),
+		ecf1R112	 = if_else(secf == "1R112", 1L, 0L),	ecf2R220	 = if_else(secf == "2R220", 1L, 0L),
+		ecf2R214	 = if_else(secf == "2R214", 1L, 0L),	ecf7R701	 = if_else(secf == "7R701", 1L, 0L),
+		ecf1R129	 = if_else(secf == "1R129", 1L, 0L),	ecf1R106	 = if_else(secf == "1R106", 1L, 0L),
+		ecf1R125	 = if_else(secf == "1R125", 1L, 0L),	ecf1R104	 = if_else(secf == "1R104", 1L, 0L),
+		ecf1R124	 = if_else(secf == "1R124", 1L, 0L),	ecf2R213	 = if_else(secf == "2R213", 1L, 0L),
+		ecf1R102	 = if_else(secf == "1R102", 1L, 0L),	ecf1R115	 = if_else(secf == "1R115", 1L, 0L),
+		ecf7R703	 = if_else(secf == "7R703", 1L, 0L),	ecf1R101	 = if_else(secf == "1R101", 1L, 0L),
+		ecf1R110	 = if_else(secf == "1R110", 1L, 0L),	ecf1R119	 = if_else(secf == "1R119", 1L, 0L),
+		ecf6R605	 = if_else(secf == "6R605", 1L, 0L),	ecf7R708	 = if_else(secf == "7R708", 1L, 0L),
+		ecf1R130	 = if_else(secf == "1R130", 1L, 0L),	ecf2R212	 = if_else(secf == "2R212", 1L, 0L),
+		ecf3R307	 = if_else(secf == "3R307", 1L, 0L),	ecf1R113	 = if_else(secf == "1R113", 1L, 0L),
+		ecf7R702	 = if_else(secf == "7R702", 1L, 0L),	ecf2R202	 = if_else(secf == "2R202", 1L, 0L),
+		ecf2R223	 = if_else(secf == "2R223", 1L, 0L),	ecf2R224	 = if_else(secf == "2R224", 1L, 0L),
+		ecf7R723	 = if_else(secf == "7R723", 1L, 0L),	ecf6R603	 = if_else(secf == "6R603", 1L, 0L),
+		ecf7R716	 = if_else(secf == "7R716", 1L, 0L),	ecf5R529	 = if_else(secf == "5R529", 1L, 0L),
+		ecf3R324	 = if_else(secf == "3R324", 1L, 0L),	ecf3R322	 = if_else(secf == "3R322", 1L, 0L),
+		ecf3R317	 = if_else(secf == "3R317", 1L, 0L),	ecf2R221	 = if_else(secf == "2R221", 1L, 0L),
+		ecf2R205	 = if_else(secf == "2R205", 1L, 0L),	ecf7R717	 = if_else(secf == "7R717", 1L, 0L),
+		ecf1R114	 = if_else(secf == "1R114", 1L, 0L),	ecf7R721	 = if_else(secf == "7R721", 1L, 0L),
+		ecf7R720	 = if_else(secf == "7R720", 1L, 0L),	ecf6R616	 = if_else(secf == "6R616", 1L, 0L),
+		ecf5R528	 = if_else(secf == "5R528", 1L, 0L),	ecf1R136	 = if_else(secf == "1R136", 1L, 0L),
+		ecf2R201	 = if_else(secf == "2R201", 1L, 0L),	ecf1R105	 = if_else(secf == "1R105", 1L, 0L),
+		ecf1R133	 = if_else(secf == "1R133", 1L, 0L),	ecf1R126	 = if_else(secf == "1R126", 1L, 0L),
+		ecf7R706	 = if_else(secf == "7R706", 1L, 0L),	ecf1R107	 = if_else(secf == "1R107", 1L, 0L),
+		ecf6R601	 = if_else(secf == "6R601", 1L, 0L),	ecf1R117	 = if_else(secf == "1R117", 1L, 0L),
+		ecf2R207	 = if_else(secf == "2R207", 1L, 0L),	ecf1R120	 = if_else(secf == "1R120", 1L, 0L),
+		ecf6R606	 = if_else(secf == "6R606", 1L, 0L),	ecf6R612	 = if_else(secf == "6R612", 1L, 0L),
+		ecf7R722	 = if_else(secf == "7R722", 1L, 0L),	ecf4R423	 = if_else(secf == "4R423", 1L, 0L),
+		ecf1R132	 = if_else(secf == "1R132", 1L, 0L),	ecf7R715	 = if_else(secf == "7R715", 1L, 0L),
+		ecf5R531	 = if_else(secf == "5R531", 1L, 0L),	ecf3R318	 = if_else(secf == "3R318", 1L, 0L),
+		ecf5R530	 = if_else(secf == "5R530", 1L, 0L),	ecf1R134	 = if_else(secf == "1R134", 1L, 0L),
+		ecf7R709	 = if_else(secf == "7R709", 1L, 0L),	ecf7R710	 = if_else(secf == "7R710", 1L, 0L),
+		ecf4R421	 = if_else(secf == "4R421", 1L, 0L),	ecf4R422	 = if_else(secf == "4R422", 1L, 0L),
+		ecf2R204	 = if_else(secf == "2R204", 1L, 0L),	ecf5R503	 = if_else(secf == "5R503", 1L, 0L),
+		ecf6R608	 = if_else(secf == "6R608", 1L, 0L),	ecf5R510	 = if_else(secf == "5R510", 1L, 0L),
+		ecf3R306	 = if_else(secf == "3R306", 1L, 0L),	ecf4R416	 = if_else(secf == "4R416", 1L, 0L),
+		ecf5R514	 = if_else(secf == "5R514", 1L, 0L),	ecf5R512	 = if_else(secf == "5R512", 1L, 0L),
+		ecf2R218	 = if_else(secf == "2R218", 1L, 0L),	ecf2R215	 = if_else(secf == "2R215", 1L, 0L),
+		ecf2R209	 = if_else(secf == "2R209", 1L, 0L),	ecf5R513	 = if_else(secf == "5R513", 1L, 0L),
+		ecf5R535	 = if_else(secf == "5R535", 1L, 0L),	ecf2R230	 = if_else(secf == "2R230", 1L, 0L),
+		ecf4R418	 = if_else(secf == "4R418", 1L, 0L),	ecf2R208	 = if_else(secf == "2R208", 1L, 0L),
+		ecf6R609	 = if_else(secf == "6R609", 1L, 0L),	ecf7R714	 = if_else(secf == "7R714", 1L, 0L),
+		ecf1R128	 = if_else(secf == "1R128", 1L, 0L),	ecf1R122	 = if_else(secf == "1R122", 1L, 0L),
+		ecf7R711	 = if_else(secf == "7R711", 1L, 0L),	ecf1R118	 = if_else(secf == "1R118", 1L, 0L),
+		ecf7R713	 = if_else(secf == "7R713", 1L, 0L),	ecf5R507	 = if_else(secf == "5R507", 1L, 0L),
+		ecf5R524	 = if_else(secf == "5R524", 1L, 0L),	ecf2R229	 = if_else(secf == "2R229", 1L, 0L),
+		ecf2R211	 = if_else(secf == "2R211", 1L, 0L),	ecf3R302	 = if_else(secf == "3R302", 1L, 0L),
+		ecf5R509	 = if_else(secf == "5R509", 1L, 0L),	ecf5R518	 = if_else(secf == "5R518", 1L, 0L),
+		ecf5R511	 = if_else(secf == "5R511", 1L, 0L),	ecf3R305	 = if_else(secf == "3R305", 1L, 0L),
+		ecf5R517	 = if_else(secf == "5R517", 1L, 0L),	ecf2R219	 = if_else(secf == "2R219", 1L, 0L),
+		ecf1R131	 = if_else(secf == "1R131", 1L, 0L),	ecf7R712	 = if_else(secf == "7R712", 1L, 0L),
+		ecf7R707	 = if_else(secf == "7R707", 1L, 0L),	ecf1R135	 = if_else(secf == "1R135", 1L, 0L),
+		ecf1R127	 = if_else(secf == "1R127", 1L, 0L),	ecf6R614	 = if_else(secf == "6R614", 1L, 0L),
+		ecf1R137	 = if_else(secf == "1R137", 1L, 0L),	ecf1R121	 = if_else(secf == "1R121", 1L, 0L),
+		ecf2R216	 = if_else(secf == "2R216", 1L, 0L),	ecf3R310	 = if_else(secf == "3R310", 1L, 0L),
+		ecf3R313	 = if_else(secf == "3R313", 1L, 0L),	ecf3R311	 = if_else(secf == "3R311", 1L, 0L),
+		ecf3R309	 = if_else(secf == "3R309", 1L, 0L),	ecf3R312	 = if_else(secf == "3R312", 1L, 0L),
+		ecf6R620	 = if_else(secf == "6R620", 1L, 0L),	ecf3R308	 = if_else(secf == "3R308", 1L, 0L),
+		ecf2R206	 = if_else(secf == "2R206", 1L, 0L),	ecf5R516	 = if_else(secf == "5R516", 1L, 0L),
+		ecf5R539	 = if_else(secf == "5R539", 1L, 0L),	ecf1R111	 = if_else(secf == "1R111", 1L, 0L),
+		ecf5R505	 = if_else(secf == "5R505", 1L, 0L),	ecf5R532	 = if_else(secf == "5R532", 1L, 0L),
+		ecf2R210	 = if_else(secf == "2R210", 1L, 0L),	CGRS6	     = if_else(secf == "CGRS6", 1L, 0L),
+		ecf5R508	 = if_else(secf == "5R508", 1L, 0L),	ecf2R217	 = if_else(secf == "2R217", 1L, 0L),
+		ecf5R537	 = if_else(secf == "5R537", 1L, 0L),	ecf5R536	 = if_else(secf == "5R536", 1L, 0L)
+	)		
+```
+
+.
+```{r oldform, eval=FALSE}
+formula_base <- ln_price ~ ln_landratio + ln_base_bldgsize_ratio +
+  arterial +
+  single_family1story + half_duplex1story + half_duplex2story +
+  smallest + small + large + largest +
+  two_plus_baths + powder_room +
+  good + fair + poor + very_poor_unsound +
+  qabove_avg + qbelow_avg +
+  yb_pre_1929 + yb_1946_to_1960 + yb_post_1961 +
+  crawl + slab +
+  ln_garagespaces + fireplace +
+  hot_water + elec_baseboard + wall + central_air +
+  ecfs_col +
+  # factor(secf) +
+  months_1to9 + months_10to16 + months_17to24
+```
+
+```{r old4f, eval=FALSE}
+formula_ln_tasp <- ln_tasp_re ~ ln_landratio + ln_base_bldgsize_ratio +
+  arterial +
+  single_family1story + half_duplex1story + half_duplex2story +
+  smallest + small + large + largest +
+  two_plus_baths + powder_room +
+  good + fair + poor + very_poor_unsound +
+  qabove_avg + qbelow_avg +
+  yb_pre_1929 + yb_1946_to_1960 + yb_post_1961 +
+  crawl + slab +
+  ln_garagespaces + fireplace +
+  hot_water + elec_baseboard + wall + central_air +
+  ecfs_col
+
+formula_alt <- ln_tasp_re ~ ln_landratio + lnsbldsfint +
+  arterial +
+  single_family1story + half_duplex1story + half_duplex2story +
+  smallest + small + large + largest +
+  two_plus_baths + powder_room +
+  good + fair + poor + very_poor_unsound +
+  qabove_avg + qbelow_avg +
+  yb_pre_1929 + yb_1946_to_1960 + yb_post_1961 +
+  crawl + slab +
+  garage + fireplace +
+  hot_water + elec_baseboard + wall + central_air +
+  ecfs_col
+```
+
+
+.
+The most reliable way is to **stop letting models “reach back” into whatever `df` happens to be at the moment**. Instead, make each model use a **frozen modeling frame** (one dataframe per model), and keep that dataframe *attached to the model* (either as an object you save, or inside the model itself via `model.frame()`/recipes). Then you can always verify `nobs()`, row IDs, and column set.
+
+Here are practical patterns that work well in your exact situation (lots of mutates, filters, stepwise, refits, mgcv, dummies, etc.).
+
+---
+
+## 1) Always create a stable `row_id` once, early
+
+This is the backbone. Do it right after import, before any filtering.
+
+```r
+df <- df %>%
+  dplyr::mutate(row_id = dplyr::row_number())
+```
+
+Now you can always map “model rows” back to the original dataset.
+
+---
+
+## 2) Build a “frozen” modeling dataframe per model
+
+For each model, create a dataset object that contains **only the needed columns** and has **NAs handled once**.
+
+Example: for your LN_TASP model:
+
+```r
+vars_ln_tasp <- c(
+  "row_id",
+  "ln_tasp_re",
+  "ln_landratio", "ln_base_bldgsize_ratio",
+  "arterial",
+  "single_family1story", "half_duplex1story", "half_duplex2story",
+  "smallest", "small", "large", "largest",
+  "two_plus_baths", "powder_room",
+  "good", "fair", "poor", "very_poor_unsound",
+  "qabove_avg", "qbelow_avg",
+  "yb_pre_1929", "yb_1946_to_1960", "yb_post_1961",
+  "crawl", "slab",
+  "ln_garagespaces", "fireplace",
+  "hot_water", "elec_baseboard", "wall", "central_air"
+  # plus ecf dummies if used: ecfs_col
+)
+
+df_ln_tasp <- df %>%
+  dplyr::select(dplyr::all_of(vars_ln_tasp)) %>%
+  tidyr::drop_na()
+```
+
+Then:
+
+```r
+mod_ln_tasp <- lm(formula_ln_tasp, data = df_ln_tasp)
+```
+
+**Rule:** once you create `df_ln_tasp`, don’t mutate it except maybe adding diagnostics/predictions. If you need new variables, create a new dataset object `df_ln_tasp_v2`.
+
+This approach prevents the classic:
+
+* `step()` row count changing
+* VIF errors due to weird refits
+* predictions failing because columns disappeared
+
+---
+
+## 3) Make a tiny “model registry” so you always know what used what
+
+This is the easiest way to keep track as your script grows.
+
+```r
+model_registry <- new.env(parent = emptyenv())
+
+register_model <- function(name, model, data) {
+  model_registry[[name]] <- list(
+    model = model,
+    data  = data,
+    nobs  = nobs(model),
+    rows  = model.frame(model)$row_id,
+    vars  = names(model.frame(model))
+  )
+  invisible(model_registry[[name]])
+}
+```
+
+Usage:
+
+```r
+mod_ln_tasp <- lm(formula_ln_tasp, data = df_ln_tasp)
+register_model("ln_tasp", mod_ln_tasp, df_ln_tasp)
+```
+
+Now you can inspect anytime:
+
+```r
+model_registry[["ln_tasp"]]$nobs
+head(model_registry[["ln_tasp"]]$rows)
+model_registry[["ln_tasp"]]$vars
+```
+
+---
+
+## 4) Always verify a model is using the intended dataframe
+
+Here’s a check function that tells you if the model rows match the dataframe rows (by `row_id`) and whether required variables are present.
+
+```r
+check_model_data <- function(model, data, id = "row_id", strict = TRUE) {
+  mf <- model.frame(model)
+
+  if (!id %in% names(mf) || !id %in% names(data)) {
+    stop("Both model.frame(model) and data must contain '", id, "'.")
+  }
+
+  used_ids <- mf[[id]]
+  data_ids <- data[[id]]
+
+  missing_in_data <- setdiff(used_ids, data_ids)
+  extra_in_data   <- setdiff(data_ids, used_ids)
+
+  vars_needed <- setdiff(names(mf), c("(Intercept)"))
+  vars_missing <- setdiff(vars_needed, names(data))
+
+  msg <- list(
+    nobs_model = nrow(mf),
+    nrow_data  = nrow(data),
+    missing_ids_in_data = missing_in_data,
+    extra_ids_in_data   = extra_in_data,
+    missing_vars_in_data = vars_missing
+  )
+
+  if (strict) {
+    if (length(missing_in_data) > 0) stop("Some model row_id values not in data.")
+    if (length(vars_missing) > 0) stop("Data missing variables used by model: ", paste(vars_missing, collapse=", "))
+  }
+
+  msg
+}
+```
+
+Usage:
+
+```r
+check_model_data(mod_ln_tasp, df_ln_tasp)
+```
+
+If you accidentally pass the wrong dataframe later, you’ll catch it immediately.
+
+---
+
+## 5) Prefer refitting from `model.frame(model)` when doing diagnostics
+
+You’ve already run into this: `update()` sometimes fails because the original `data=` expression isn’t stable.
+
+For diagnostics/predictions/VIF, this is a rock-solid pattern:
+
+```r
+df_used <- model.frame(mod_ln_tasp)   # EXACT data used
+```
+
+Then do all diagnostics on `df_used` or join results back by `row_id`.
+
+This guarantees you’re not accidentally using a “similar but not identical” dataframe.
+
+---
+
+## 6) Make a standard “fit wrapper” that freezes data automatically
+
+If you want one reusable approach:
+
+```r
+fit_lm_frozen <- function(formula, data, id = "row_id") {
+  if (!id %in% names(data)) {
+    data <- data %>% dplyr::mutate(!!id := dplyr::row_number())
+  }
+
+  mf <- model.frame(formula, data = data, na.action = na.omit)
+
+  # Fit on the frozen model frame (so step/update always stable)
+  mod <- lm(formula, data = mf)
+
+  list(
+    model = mod,
+    data  = mf,
+    row_id = mf[[id]]
+  )
+}
+```
+
+Usage:
+
+```r
+fit1 <- fit_lm_frozen(formula_ln_tasp, df)
+mod_ln_tasp <- fit1$model
+df_ln_tasp  <- fit1$data
+```
+
+Now `mod_ln_tasp` and `df_ln_tasp` are forever aligned.
+
+---
+
+## 7) Naming convention that prevents confusion
+
+Adopt a consistent scheme:
+
+* `df_raw` = loaded file, minimal cleaning
+* `df_feat` = engineered variables (logs, dummies, month bins)
+* `df_<modelname>` = frozen modeling dataset
+* `mod_<modelname>_full`, `mod_<modelname>_back` etc.
+
+Example:
+
+* `df_feat`
+* `df_ln_price`
+* `mod_ln_price_full`, `mod_ln_price_back`
+* `df_ln_tasp`
+* `mod_ln_tasp_full`, `mod_ln_tasp_back`
+
+And never overwrite those objects. If you change something, make `df_ln_tasp_v2`.
+
+---
+
+## Practical “do this now” checklist for your script
+
+1. Add `row_id` once to your main dataframe.
+2. For every model:
+
+   * define a `vars_...` vector
+   * build `df_... <- df %>% select(all_of(vars)) %>% drop_na()`
+   * fit using `data = df_...`
+3. Immediately after fitting:
+
+   * `register_model("name", mod, df_...)` (optional)
+   * or at least save `df_used <- model.frame(mod)`
+4. For any later diagnostics/refits:
+
+   * use `model.frame(mod)` (not the global df)
+
+---
+
+.
+
+Yes to both — and the “right” choice depends on whether the filtered data is a **subset of rows** (same columns) or you’ve **summarized/aggregated** it.
+
+Below are the safest patterns I use in modeling workflows.
+
+---
+
+## 1) Add a variable computed on a filtered df back to the original df
+
+### Case A — `df_in` is just a filtered subset of rows of `df`
+
+Example: `df_in <- df %>% filter(GOOD == 1)` and you computed `ratio2` per-row.
+
+**Best practice:** make sure there’s a stable row identifier (e.g., `SALEID`) and join it back.
+
+```r
+library(dplyr)
+
+df_in <- df %>%
+  filter(GOOD == 1) %>%
+  mutate(ratio2 = pred_price / saleprice) %>%
+  select(SALEID, ratio2)
+
+df <- df %>%
+  left_join(df_in, by = "SALEID")
+```
+
+✅ This will add `ratio2` to matching rows and leave others as `NA`.
+✅ Safe even if the row order changes.
+
+**If you don’t have a key**, but `df_in` came directly from `df` and row order is intact, you can do row-index assignment — but it’s less safe:
+
+```r
+idx <- which(df$GOOD == 1)
+df$ratio2 <- NA_real_
+df$ratio2[idx] <- df_in$ratio2
+```
+
+I’d avoid this unless you’re sure the rows haven’t been re-ordered.
+
+---
+
+### Case B — `df_in` has fewer rows because you aggregated
+
+Example: you computed `ratio2` by `month_key` or by `zip`, etc.
+Then you must join back using that grouping key.
+
+```r
+ratio_by_zip <- df %>%
+  filter(GOOD == 1) %>%
+  group_by(ZIP) %>%
+  summarise(ratio2 = mean(pred_price / saleprice, na.rm = TRUE), .groups = "drop")
+
+df <- df %>% left_join(ratio_by_zip, by = "ZIP")
+```
+
+---
+
+## 2) Create a “safe” new dataframe to store model outputs / derived variables
+
+This is often the cleanest approach: keep your raw `df` untouched, and maintain a **model_outputs table** keyed by ID.
+
+### Pattern: a “results ledger” (wide form)
+
+```r
+library(dplyr)
+
+results <- df %>%
+  distinct(SALEID)   # start minimal, just the key
+
+# After model 1:
+pred1 <- tibble(SALEID = df$SALEID, pred_m1 = pred_price_m1)
+results <- results %>% left_join(pred1, by = "SALEID")
+
+# After model 2:
+pred2 <- tibble(SALEID = df$SALEID, pred_m2 = pred_price_m2)
+results <- results %>% left_join(pred2, by = "SALEID")
+```
+
+Then you can compute ratios safely without touching `df`:
+
+```r
+results <- results %>%
+  left_join(df %>% select(SALEID, saleprice), by = "SALEID") %>%
+  mutate(ratio_m1 = pred_m1 / saleprice,
+         ratio_m2 = pred_m2 / saleprice)
+```
+
+This makes it trivial to keep predictions/residuals from multiple models aligned.
+
+---
+
+### Pattern: long/tidy form (best for many models)
+
+If you’ll have lots of models, store predictions in long format:
+
+```r
+library(tidyr)
+
+pred_long <- bind_rows(
+  tibble(SALEID = df$SALEID, model = "m1", pred = pred_price_m1),
+  tibble(SALEID = df$SALEID, model = "m2", pred = pred_price_m2)
+)
+
+# join saleprice once
+pred_long <- pred_long %>%
+  left_join(df %>% select(SALEID, saleprice), by = "SALEID") %>%
+  mutate(ratio = pred / saleprice)
+```
+
+Retrieve all rows for a model:
+
+```r
+pred_long %>% filter(model == "m2")
+```
+
+Pivot wide if needed:
+
+```r
+pred_long %>% select(SALEID, model, pred) %>%
+  pivot_wider(names_from = model, values_from = pred)
+```
+
+---
+
+## 3) If you’re using tidymodels: use `augment()` and then join
+
+This is a really nice workflow because it standardizes column names:
+
+```r
+library(workflows)
+library(dplyr)
+
+aug_m1 <- augment(fit_m1, new_data = df) %>%
+  transmute(SALEID, pred_m1 = .pred)
+
+aug_m2 <- augment(fit_m2, new_data = df) %>%
+  transmute(SALEID, pred_m2 = .pred)
+
+results <- df %>%
+  distinct(SALEID) %>%
+  left_join(aug_m1, by = "SALEID") %>%
+  left_join(aug_m2, by = "SALEID")
+```
+
+---
+
+## What I recommend for your use case
+
+Since you’re running multiple models and comparing SPSS/R metrics:
+
+✅ Keep `df` as “raw + cleaned features”
+✅ Maintain a separate `results` table keyed by `SALEID` that stores:
+
+* predictions (`pred_m1`, `pred_m2`, …)
+* residuals (`resid_m1`, …)
+* ratios (`ratio_m1`, …)
+* flags (`good_sale`, filter indicators)
+
+This avoids the common mistake where you compute something on a filtered dataset and accidentally misalign rows later.
+
+---
+
+If you tell me what your unique key is (`SALEID`? `PARCELNO` + `SALEDATE`?), I can give you a small pair of helper functions:
+
+* `add_model_preds(results, model, data, id, name)`
+* `add_ratio(results, sale_df, id, sale_col, pred_col, ratio_name)`
+
+…so adding each new model becomes 2 lines.
+
+
+.
+
+
+
+.
+
+
+
+.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+.
+
+
+.
+
+
+.
+
+

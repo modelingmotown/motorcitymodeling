@@ -1,0 +1,380 @@
+---
+title: "City of Detroit | Geospatial Data"
+author: |
+  | Elliot Dean - Program Analyst IV  
+  | Office of the Chief Financial Officer | Office of the Assessor
+  | City of Detroit
+date: "`r sub('^0', '', format(Sys.Date(), '%d %B %Y'))`"
+geometry: margin = 1.5cm
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+mainfont: Arial
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, error = FALSE, echo = FALSE)
+```
+
+```{r lib_load}
+library(tidyverse)    # data wrangling & ggplot2
+library(janitor)      # functions for examining and cleaning dirty data
+library(kableExtra)   # simple table generator
+library(here)         # Find files within a project
+library(rlang)        # functions for Base Types and Core R and 'Tidyverse' Features
+library(car)          # VIF, influence measures helpers
+library(scales)       # provides the internal scaling infrastructure used by ggplot
+library(sf)           # used for handling and analyzing spatial data
+library(httr2)        # make HTTP requests and handle responses
+library(jsonlite)     # provides functions for parsing and generating JSON data
+library(arcgislayers) # connect to ArcGIS Data Services
+library(geosphere)    # Spherical trigonometry for geographic applications
+library(osrm)         # Shortest Paths and Travel Time from OpenStreetMap
+library(openrouteservice)
+# ors_api_key("eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjUzM2MyNDg1YWE4NjRmYzQ4YjRiNWM3ODA0OTcxYjlmIiwiaCI6Im11cm11cjY0In0=")
+# ors_api_key("eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImJiODdhMDMzNGE2YjQxZGQ5ZjkyZDY0MGZmMDFkMTI5IiwiaCI6Im11cm11cjY0In0=")
+```
+
+---
+
+```{r fun}
+load(file = here("rmds/modfunctions", "modfunctions13.RData"))
+
+ors_api_key("eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImJiODdhMDMzNGE2YjQxZGQ5ZjkyZDY0MGZmMDFkMTI5IiwiaCI6Im11cm11cjY0In0=")
+```
+
+Functions Used: modfunctions_notes.R + modelfunctions.R
+
+```{r dataload1, eval=FALSE}
+load(file = here("data/rdata", "cod2022-2025.RData"))
+#df <- dfa
+df       <- cod24$data
+ecfs_col <- cod24$ecfs_col
+```
+
+```{r dataload}
+#load(file = here("data/rdata", "CODsalesSFapr2023Mar2025fin.RData"))
+#df <- dfa
+#df <- read_csv(here("data/city", "salesSFapr2023toMarch2025Updated.csv")) |>
+#  rename_with(tolower)
+load(file = here("data/rdata", "cod_2022-2025_July23.RData"))
+```
+
+## Setup - Get Coordinates
+
+```{r addparcel, eval=FALSE}
+sales_df <- add_detroit_parcel_coords(df, "parcelno")
+```
+
+```{r addcoords}
+sales_df <- add_detroit_parcel_coords(
+  df25, "parcelno", x_col = "x_coord", y_col = "y_coord", batch_size = 100, quiet = FALSE
+)
+```
+
+---
+
+## Distances - Linear
+
+```{r dist1}
+sales_df <- add_linear_distance(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -83.0777,
+  target_lat = 42.3679,  out_m_col = "dist_henryford_m",
+  out_km_col = "dist_henryford_km",  out_mi_col = "dist_henryford_mi"
+)
+
+sales_df <- add_linear_distance(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -83.0466,
+  target_lat = 42.3317,  out_m_col = "dist_guardian_m",
+  out_km_col = "dist_guardian_km",  out_mi_col = "dist_guardian_mi"
+)
+
+sales_df <- add_linear_distance(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -83.0330,
+  target_lat = 42.3441,  out_m_col = "dist_dequindre_m",
+  out_km_col = "dist_dequindre_km",  out_mi_col = "dist_dequindre_mi"
+)
+```
+
+```{r dist2}
+sales_df <- add_linear_distance(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -82.9952,
+  target_lat = 42.3393,  out_m_col = "dist_belleisle_m",
+  out_km_col = "dist_belleisle_km",  out_mi_col = "dist_belleisle_mi"
+)
+
+sales_df <- add_linear_distance(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -83.0015,
+  target_lat = 42.4093,  out_m_col = "dist_cayairport_m",
+  out_km_col = "dist_cayairport_km",  out_mi_col = "dist_cayairport_mi"
+)
+
+sales_df <- add_linear_distance(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -83.3424,
+  target_lat = 42.2184,  out_m_col = "dist_dtw_m",
+  out_km_col = "dist_dtw_km",  out_mi_col = "dist_dtw_mi"
+)
+```
+
+```{r dist3}
+sales_df <- add_linear_distance(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -83.1125,
+  target_lat = 42.4245,  out_m_col = "dist_palmer_m",
+  out_km_col = "dist_palmer_km",  out_mi_col = "dist_palmer_mi"
+)
+
+sales_df <- add_linear_distance(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -83.0765,
+  target_lat = 42.3311,  out_m_col = "dist_roosevelt_m",
+  out_km_col = "dist_roosevelt_km",  out_mi_col = "dist_roosevelt_mi"
+)
+
+sales_df <- add_linear_distance(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -83.0549,
+  target_lat = 42.3532,  out_m_col = "dist_dmc_m",
+  out_km_col = "dist_dmc_km",  out_mi_col = "dist_dmc_mi"
+)
+```
+
+```{r dist4}
+sales_df <- add_linear_distance(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -83.0638,
+  target_lat = 42.3575,  out_m_col = "dist_wayne_m",
+  out_km_col = "dist_wayne_km",  out_mi_col = "dist_wayne_mi"
+)
+
+sales_df <- add_linear_distance(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -83.0473,
+  target_lat = 42.3395,  out_m_col = "dist_comerica_m",
+  out_km_col = "dist_comerica_km",  out_mi_col = "dist_comerica_mi"
+)
+
+sales_df <- add_linear_distance(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -83.0497,
+  target_lat = 42.3929,  out_m_col = "dist_hamtramck_m",
+  out_km_col = "dist_hamtramck_km",  out_mi_col = "dist_hamtramck_mi"
+)
+```
+
+---
+
+## Distances - Driving Route & Time
+
+```{r drivedist1b, eval=FALSE}
+sales_df <- add_drive_distance_ors(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -83.0777,
+  target_lat = 42.3679,  dist_col = "drive_henryford_km",  time_col = "drive_henryford_min"
+)
+
+sales_df <- add_drive_distance_ors(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -83.0466,
+  target_lat = 42.3317,  dist_col = "drive_guardian_km",  time_col = "drive_guardian_min"
+)
+
+sales_df <- add_drive_distance_ors(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -83.0330,
+  target_lat = 42.3441,  dist_col = "drive_dequindre_km",  time_col = "drive_dequindre_min"
+)
+```
+
+```{r drivedist2b, eval=FALSE}
+sales_df <- add_drive_distance_ors(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -82.9952,
+  target_lat = 42.3393,  dist_col = "drive_belleisle_km",  time_col = "drive_belleisle_min"
+)
+
+sales_df <- add_drive_distance_ors(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -83.0015,
+  target_lat = 42.4093,  dist_col = "drive_cayairport_km",  time_col = "drive_cayairport_min"
+)
+
+sales_df <- add_drive_distance_ors(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -83.3424,
+  target_lat = 42.2184,  dist_col = "drive_dtw_km",  time_col = "drive_dtw_min"
+)
+```
+
+```{r drivedist3b, eval=FALSE}
+sales_df <- add_drive_distance_ors(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -83.1125,
+  target_lat = 42.4245,  dist_col = "drive_palmer_km",  time_col = "drive_palmer_min"
+)
+
+sales_df <- add_drive_distance_ors(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -83.0765,
+  target_lat = 42.3311,  dist_col = "drive_roosevelt_km",  time_col = "drive_roosevelt_min"
+)
+
+sales_df <- add_drive_distance_ors(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -83.0549,
+  target_lat = 42.3532,  dist_col = "drive_dmc_km",  time_col = "drive_dmc_min"
+)
+```
+
+```{r drivedist4b, eval=FALSE}
+sales_df <- add_drive_distance_ors(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -83.0638,
+  target_lat = 42.3575,  dist_col = "drive_wayne_km",  time_col = "drive_wayne_min"
+)
+
+sales_df <- add_drive_distance_ors(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -83.0473,
+  target_lat = 42.3395,  dist_col = "drive_comerica_km",  time_col = "drive_comerica_min"
+)
+
+sales_df <- add_drive_distance_ors(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -83.0497,
+  target_lat = 42.3929,  dist_col = "drive_hamtramck_km",  time_col = "drive_hamtramck_min"
+)
+```
+
+```{r drivedist}
+sales_df <- add_drive_distance_graphhopper(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -83.0777,
+  target_lat = 42.3679,  dist_col = "drive_henryford_km",  time_col = "drive_henryford_min", profile = "car", server_url = "http://localhost:8989"
+)
+
+sales_df <- add_drive_distance_graphhopper(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -83.0466,
+  target_lat = 42.3317,  dist_col = "drive_guardian_km",  time_col = "drive_guardian_min", profile = "car", server_url = "http://localhost:8989"
+)
+
+sales_df <- add_drive_distance_graphhopper(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -83.0330,
+  target_lat = 42.3441,  dist_col = "drive_dequindre_km",  time_col = "drive_dequindre_min", profile = "car", server_url = "http://localhost:8989"
+)
+
+sales_df <- add_drive_distance_graphhopper(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -82.9952,
+  target_lat = 42.3393,  dist_col = "drive_belleisle_km",  time_col = "drive_belleisle_min", profile = "car", server_url = "http://localhost:8989"
+)
+
+sales_df <- add_drive_distance_graphhopper(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -83.0015,
+  target_lat = 42.4093,  dist_col = "drive_cayairport_km",  time_col = "drive_cayairport_min", profile = "car", server_url = "http://localhost:8989"
+)
+
+sales_df <- add_drive_distance_graphhopper(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -83.3424,
+  target_lat = 42.2184,  dist_col = "drive_dtw_km",  time_col = "drive_dtw_min", profile = "car", server_url = "http://localhost:8989"
+)
+
+sales_df <- add_drive_distance_graphhopper(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -83.1125,
+  target_lat = 42.4245,  dist_col = "drive_palmer_km",  time_col = "drive_palmer_min", profile = "car", server_url = "http://localhost:8989"
+)
+
+sales_df <- add_drive_distance_graphhopper(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -83.0765,
+  target_lat = 42.3311,  dist_col = "drive_roosevelt_km",  time_col = "drive_roosevelt_min", profile = "car", server_url = "http://localhost:8989"
+)
+
+sales_df <- add_drive_distance_graphhopper(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -83.0549,
+  target_lat = 42.3532,  dist_col = "drive_dmc_km",  time_col = "drive_dmc_min", profile = "car", server_url = "http://localhost:8989"
+)
+
+sales_df <- add_drive_distance_graphhopper(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -83.0638,
+  target_lat = 42.3575,  dist_col = "drive_wayne_km",  time_col = "drive_wayne_min", profile = "car", server_url = "http://localhost:8989"
+)
+
+sales_df <- add_drive_distance_graphhopper(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -83.0473,
+  target_lat = 42.3395,  dist_col = "drive_comerica_km",  time_col = "drive_comerica_min", profile = "car", server_url = "http://localhost:8989"
+)
+
+sales_df <- add_drive_distance_graphhopper(
+  df = sales_df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -83.0497,
+  target_lat = 42.3929,  dist_col = "drive_hamtramck_km",  time_col = "drive_hamtramck_min", profile = "car", server_url = "http://localhost:8989"
+)
+```
+
+
+---
+
+## Log Transformations + Distance Thresholds
+
+```{r logt}
+sales_df <- sales_df %>%
+  mutate(
+    dist_henryford_log = log1p(dist_henryford_mi),
+    drive_henryford_log = log1p(drive_henryford_min),
+    dist_guardian_log = log1p(dist_guardian_mi),
+    drive_guardian_log = log1p(drive_guardian_min),
+    dist_dequindre_log = log1p(dist_dequindre_mi),
+    drive_dequindre_log = log1p(drive_dequindre_min),
+    dist_belleisle_log = log1p(dist_belleisle_mi),
+    drive_belleisle_log = log1p(drive_belleisle_min),
+    dist_cayairport_log = log1p(dist_cayairport_mi),
+    drive_cayairport_log = log1p(drive_cayairport_min),
+    dist_dtw_log = log1p(dist_dtw_mi),
+    drive_dtw_log = log1p(drive_dtw_min),
+    dist_palmer_log = log1p(dist_palmer_mi),
+    drive_palmer_log = log1p(drive_palmer_min),
+    dist_roosevelt_log = log1p(dist_roosevelt_mi),
+    drive_roosevelt_log = log1p(drive_roosevelt_min),
+    dist_dmc_log = log1p(dist_dmc_mi),
+    drive_dmc_log = log1p(drive_dmc_min),
+    dist_wayne_log = log1p(dist_wayne_mi),
+    drive_wayne_log = log1p(drive_wayne_min),
+    dist_comercia_log = log1p(dist_comerica_mi),
+    drive_comerica_log = log1p(drive_comerica_min),
+    dist_hamtramck_log = log1p(dist_hamtramck_mi),
+    drive_hamtramck_log = log1p(drive_hamtramck_min)
+  )
+
+sales_df <- sales_df %>%
+  mutate(
+    near_downtown_1mi = as.integer(dist_guardian_mi <= 1),
+    near_downtown_5mi = as.integer(dist_guardian_mi <= 5),
+    near_downtown_10mi = as.integer(dist_guardian_mi <= 10),
+  )
+```
+
+---
+
+## Interacting Variable Creation
+
+```{r ivc, eval=FALSE}
+sales_df <- sales_df %>%
+  mutate(
+    dist_x_sqft = dist_guardian_mi * lnsbldsf,
+    dist_x_age  = dist_guardian_mi * sresb_yearbuilt
+  )
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r datsav}
+# dfc <- df
+#save(sales_df, sales_df_in, file = here("data/rdata", "cod_2022-2025geofin.RData"))
+save(sales_df, file = here("data/rdata", "cod_2022-2025geo_23July.RData"))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

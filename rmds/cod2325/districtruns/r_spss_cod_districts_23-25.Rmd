@@ -1,0 +1,742 @@
+---
+title: |
+  | Detroit Council Districts 1 - 7 Regression Model Comparison:
+  | R | SPSS&nbsp;&nbsp;&nbsp;&nbsp;2023 - 2025 Sales
+author: |
+  | Elliot Dean - Program Analyst IV  
+  | Office of the Chief Financial Officer | Office of the Assessor
+  | City of Detroit
+date: "`r sub('^0', '', format(Sys.Date(), '%d %B %Y'))`"
+geometry: margin = 1.5cm
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+    toc_depth: 3
+mainfont: Arial
+spacing: 1.5
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, error = FALSE, echo = FALSE)
+```
+
+```{r lib_load}
+library(tidyverse)   # data wrangling & ggplot2
+library(cowplot)     # Streamlined Plot Theme and Plot Annotations for 'ggplot2'
+library(patchwork)   # The Composer of Plots
+library(janitor)     # functions for examining and cleaning dirty data
+library(kableExtra)  # simple table generator
+library(here)        # Find files within a project
+library(olsrr)       # package for p-value backward elimination
+library(broom)       # summarizes key information about models
+library(rlang)       # functions for Base Types and Core R and 'Tidyverse' Features
+library(car)         # VIF, influence measures helpers
+library(scales)      # provides the internal scaling infrastructure used by ggplot
+library(effects)     # Effect Displays for Linear, Generalized Linear, and Other Models
+```
+
+```{r fun, results='hide'}
+codf     <- readRDS(file = here("rmds/modfunctions", "codfunctions.rds"))
+codform  <- readRDS(file = here("rmds", "codformulas.rds"))
+codf_env <- list2env(codf, parent = globalenv())
+for (nm in names(codf)) {environment(codf[[nm]]) <- codf_env}
+list2env(codf, envir = codf_env)
+source(here("rmds/cod2325/districtruns/d2325f", "spss_cod_district-7_23-25f.R"), local = knitr::knit_global())
+```
+
+```{r loadmodsdata}
+load(here("rmds/cod2325/districtruns/dmods", "spss_cod_district-1_23-25_June5.RData"))
+load(here("rmds/cod2325/districtruns/dmods", "spss_cod_district-2_23-25_June5.RData"))
+load(here("rmds/cod2325/districtruns/dmods", "spss_cod_district-3_23-25_June5.RData"))
+load(here("rmds/cod2325/districtruns/dmods", "spss_cod_district-4_23-25_June2.RData"))
+load(here("rmds/cod2325/districtruns/dmods", "spss_cod_district-5_23-25_June2.RData"))
+load(here("rmds/cod2325/districtruns/dmods", "spss_cod_district-6_23-25_June2.RData"))
+load(here("rmds/cod2325/districtruns/dmods", "spss_cod_district-7_23-25_June2.RData"))
+dfspss <- read_csv(here("data/spss", "spssmods.csv"))
+spsdf  <- read_csv(here("data/spss", "spssmods1.csv"))
+dfsps  <- read_csv(here("data/spss", "spsscos.csv"))
+```
+
+```{r heatmap_set_r}
+r_models <- list(
+  D1 = list(M1 = d1_mod_time_23_25_June5, M2 = d1_mod_ln_price_no_ecf_23_25_June5,
+            M3 = d1_mod_base_23_25_June5, M4 = d1_mod_base_inliers_23_25_June5,
+            M5 = d1_mod_tasp_23_25_June5),
+  D2 = list(M1 = d2_mod_time_23_25_June5, M2 = d2_mod_ln_price_no_ecf_23_25_June5,
+            M3 = d2_mod_base_23_25_June5, M4 = d2_mod_base_inliers_23_25_June5,
+            M5 = d2_mod_tasp_23_25_June5),
+  D3 = list(M1 = d3_mod_time_23_25_June5, M2 = d3_mod_ln_price_no_ecf_23_25_June5,
+            M3 = d3_mod_base_23_25_June5, M4 = d3_mod_base_inliers_23_25_June5,
+            M5 = d3_mod_tasp_23_25_June5),
+  D4 = list(M1 = d4_mod_time_23_25_June2, M2 = d4_mod_ln_price_no_ecf_23_25_June2,
+            M3 = d4_mod_base_23_25_June2, M4 = d4_mod_base_inliers_23_25_June2,
+            M5 = d4_mod_tasp_23_25_June2),
+  D5 = list(M1 = d5_mod_time_23_25_June2, M2 = d5_mod_ln_price_no_ecf_23_25_June2,
+            M3 = d5_mod_base_23_25_June2, M4 = d5_mod_base_inliers_23_25_June2,
+            M5 = d5_mod_tasp_23_25_June2),
+  D6 = list(M1 = d6_mod_time_23_25_June2, M2 = d6_mod_ln_price_no_ecf_23_25_June2,
+            M3 = d6_mod_base_23_25_June2, M4 = d6_mod_base_inliers_23_25_June2,
+            M5 = d6_mod_tasp_23_25_June2),
+  D7 = list(M1 = d7_mod_time_23_25_June2, M2 = d7_mod_ln_price_no_ecf_23_25_June2,
+            M3 = d7_mod_base_23_25_June2, M4 = d7_mod_base_inliers_23_25_June2,
+            M5 = d7_mod_tasp_23_25_June2)
+)
+
+extract_lm_metrics <- function(mod) {
+  sm <- summary(mod)
+  f  <- sm$fstatistic
+  tibble(
+    r = sqrt(max(sm$r.squared, 0)),   r_squared = sm$r.squared,
+    adj_r_squared = sm$adj.r.squared, see = sm$sigma,
+    f_stat = if (!is.null(f)) unname(f["value"]) else NA_real_
+  )
+}
+
+r_fit <- imap_dfr(
+  r_models,
+  \(district_models, district) {
+    imap_dfr(
+      district_models,
+      \(mod, model) {
+        extract_lm_metrics(mod) |> mutate(district = district, model = model, .before = 1)
+      }
+    )
+  }
+)
+
+extract_ratio_metrics <- function(mod, response_is_logged = TRUE, correction_factor = 1) {
+  mf     <- model.frame(mod)
+  actual <- model.response(mf)
+  pred   <- fitted(mod)
+
+  if (response_is_logged) {
+    actual <- exp(actual)
+    pred   <- exp(pred) * correction_factor
+  }
+
+  ok           <- is.finite(actual) & is.finite(pred) & actual > 0 & pred > 0
+  actual       <- actual[ok]
+  pred         <- pred[ok]
+  ratio        <- pred / actual
+  median_ratio <- median(ratio)
+  mean_ratio   <- mean(ratio)
+  wmean_ratio  <- sum(pred) / sum(actual)
+  COD          <- mean(abs(ratio - median_ratio)) / median_ratio
+  PRD          <- mean_ratio / wmean_ratio
+  value_proxy  <- 0.5 * (actual + pred / median_ratio)
+
+  prb_df <- tibble(y = ratio / median_ratio - 1, x = log2(value_proxy)) |>
+    filter(is.finite(x), is.finite(y))
+  
+  ok_ratio <- is.finite(ratio)
+  r_ok     <- ratio[ok_ratio]
+  n_ok     <- length(r_ok)
+  
+  within_med_n <- function(pct) {
+    lo <- (1 - pct/100) * median_ratio
+    hi <- (1 + pct/100) * median_ratio
+    sum(r_ok >= lo & r_ok <= hi, na.rm = TRUE)
+  }
+  
+  w10_n <- within_med_n(10)
+  w20_n <- within_med_n(20)
+  w50_n <- within_med_n(50)
+  w10_pct <- if (n_ok > 0) 100 * w10_n / n_ok else NA_real_
+  w20_pct <- if (n_ok > 0) 100 * w20_n / n_ok else NA_real_
+  w50_pct <- if (n_ok > 0) 100 * w50_n / n_ok else NA_real_
+
+  PRB <- if (nrow(prb_df) >= 3) {coef(lm(y ~ x, data = prb_df))[["x"]]} else {NA_real_}
+  tibble(median_ratio = median_ratio, COD = COD, PRD = PRD, PRB = PRB, within_10_pct = w10_pct,
+    within_20_pct = w20_pct, within_50_pct = w50_pct)
+}
+
+r_ratio <- imap_dfr(
+  r_models,
+  \(district_models, district) {
+    imap_dfr(
+      district_models,
+      \(mod, model) {
+        extract_ratio_metrics(mod, response_is_logged = TRUE) |>
+          mutate(district = district, model = model, .before = 1)
+      }
+    )
+  }
+)
+
+r_metrics <- left_join(r_fit, r_ratio, by = c("district", "model")) |> dplyr::mutate(source = "R")
+
+spss_metrics <- spsdf |> mutate(district = paste0("D", codd), model = paste0("M", model)) |> 
+  rename(r_squared = r2, adj_r_squared = adj_r2) |> dplyr::mutate(source = "SPSS")
+```
+
+```{r hm2}
+metrics_to_compare <- c(
+  "r_squared", "adj_r_squared", "see", "f_stat", "median_ratio", "COD", "PRD", "PRB",
+  "within_10_pct", "within_20_pct", "within_50_pct"
+)
+
+r_long <- r_metrics |> select(district, model, all_of(metrics_to_compare)) |>
+  pivot_longer(cols = all_of(metrics_to_compare), names_to = "metric", values_to = "r_value")
+
+spss_long <- spss_metrics |> select(district, model, all_of(metrics_to_compare)) |>
+  pivot_longer(cols = all_of(metrics_to_compare), names_to = "metric", values_to = "spss_value")
+
+comparison <- r_long |> inner_join(spss_long, by = c("district", "model", "metric"))
+
+metric_tolerances <- tribble(
+  ~metric,          ~tolerance,
+  "r_squared",       0.005,
+  "adj_r_squared",   0.005,
+  "see",             0.010,
+  "f_stat",          1.000,
+  "median_ratio",    0.005,
+  "COD",             0.500,
+  "PRD",             0.005,
+  "PRB",             0.005,
+  "within_10_pct",   0.100,
+  "within_20_pct",   0.100,
+  "within_50_pct",   0.100
+)
+
+comparison <- comparison |> left_join(metric_tolerances, by = "metric") |>
+  mutate(difference = r_value - spss_value,
+    abs_difference = abs(difference), discrepancy_score = abs_difference / tolerance)
+
+comparison <- comparison |>
+  mutate(district_num = readr::parse_number(district),
+    model_num = readr::parse_number(model),
+    model_id = paste0("District ", district_num, " – Model ", model_num)) |>
+  arrange(district_num, model_num) |>
+  mutate(model_id = factor(model_id, levels = rev(unique(model_id))))
+
+metric_labels <- c(
+  r_squared     = "R²",           adj_r_squared = "Adj. R²",    see = "SEE", f_stat = "F",
+  median_ratio  = "Median Ratio", COD = "COD",                  PRD = "PRD", PRB    = "PRB",
+  within_10_pct = "Within 10%",   within_20_pct = "Within 20%", within_50_pct = "Within 50%"
+)
+
+comparison <- comparison |>
+  mutate(metric_label = factor(metric_labels[metric], levels = unname(metric_labels)))
+#
+metric_rules <- tibble::tribble(
+  ~metric,           ~rule,             ~target,
+  "r",               "higher_better",    NA_real_,
+  "r_squared",       "higher_better",    NA_real_,
+  "adj_r_squared",   "higher_better",    NA_real_,
+  "see",             "lower_better",     NA_real_,
+  "rmse",            "lower_better",     NA_real_,
+  "mae",             "lower_better",     NA_real_,
+  "f_stat",          "higher_better",    NA_real_,   # optional
+  "median_ratio",    "closer_to_target", 1.00,
+  "COD",             "lower_better",     NA_real_,
+  "PRD",             "closer_to_target", 1.00,
+  "PRB",             "closer_to_target", 0.00,
+  "within_10_pct",   "higher_better",    NA_real_,
+  "within_20_pct",   "higher_better",    NA_real_,
+  "within_50_pct",   "higher_better",    NA_real_
+)
+
+strength_df <- comparison |> left_join(metric_rules, by = "metric") |>
+  mutate(
+    raw_strength = case_when(
+      rule == "higher_better" ~ r_value - spss_value,
+      rule == "lower_better"  ~ spss_value - r_value,
+      rule == "closer_to_target" ~
+        abs(spss_value - target) - abs(r_value - target), TRUE ~ NA_real_
+    )
+  )
+
+strength_df <- strength_df |> group_by(metric) |>
+  mutate(
+    max_abs_strength = max(abs(raw_strength), na.rm = TRUE),
+    strength_scaled = case_when(
+      is.na(raw_strength) ~ NA_real_,
+      max_abs_strength == 0 ~ 0, TRUE ~ raw_strength / max_abs_strength
+    )
+  ) |> ungroup()
+
+metric_order <- c(
+  "R", "R²", "Adj. R²", "SEE", "RMSE", "MAE", "F",
+  "Median Ratio", "COD", "PRD", "PRB", "Within 10%", "Within 20%", "Within 50%"
+)
+
+strength_df <- strength_df |>
+  mutate(
+    metric_label = metric_labels[metric],
+    metric_label = factor(metric_label, levels = metric_order)
+  )
+
+strength_df <- strength_df |>
+  mutate(
+    diff_label = case_when(
+      metric %in% c("COD") ~ sprintf("%+.2f", r_value - spss_value),
+      metric %in% c("within_10_pct", "within_20_pct", "within_50_pct") ~
+        sprintf("%+.2f", r_value - spss_value), TRUE ~ sprintf("%+.4f", r_value - spss_value)
+    )
+  )
+
+metric_labels2 <- c(
+  r              = "R",
+  r_squared      = "R²",
+  adj_r_squared  = "Adj. R²",
+  see            = "SEE",
+  rmse           = "RMSE",
+  mae            = "MAE",
+  f_stat         = "F",
+  median_ratio   = "Median Ratio",
+  COD            = "COD",
+  PRD            = "PRD",
+  PRB            = "PRB",
+  within_10_pct  = "Within 10%",
+  within_20_pct  = "Within 20%",
+  within_50_pct  = "Within 50%"
+)
+
+strength_df2 <- strength_df |>
+  mutate(
+    district_num2 = readr::parse_number(as.character(district)),
+    model_num2    = readr::parse_number(as.character(model)),
+    row_id = paste0("District ", district_num2, " – Model ", model_num2),
+    row_id = factor(row_id, levels = rev(unique(row_id[order(district_num2, model_num2)]))),
+    metric_label2 = factor(metric_labels2[metric],
+      levels = unname(metric_labels2[metric_labels2 %in% metric_labels2]))
+  )
+```
+
+```{r heatmapplot, eval=FALSE}
+heatmap_plot <- ggplot(
+  comparison, aes(x = metric_label, y = model_id, fill = discrepancy_score)
+) + geom_tile(color = "white", linewidth = 0.7) +
+  scale_fill_gradientn(
+    colours = c("#1a9850", "#91cf60", "#fee08b", "#fc8d59", "#d73027"),
+    values = scales::rescale(c(0, 0.5, 1, 2, 3)), limits = c(0, 3), oob = scales::squish,
+    name = "Difference /\nTolerance"
+  ) +
+  labs(
+    title = "SPSS vs R Model Reproducibility",
+    subtitle = "Comparison across 7 districts and 5 model specifications",
+    x = NULL, y = NULL
+  ) + theme_minimal(base_size = 11) +
+  theme(
+    panel.grid = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1, face = "bold"),
+    axis.text.y = element_text(size = 8), plot.title = element_text(face = "bold", size = 16),
+    legend.position = "right"
+  )
+heatmap_plot
+```
+
+---
+
+## Introduction
+
+This report contains multiple comparisons of linear regression models prepared in SPSS, and R.
+In order to assure model reproducibility, datasets and methods utilized in SPSS were implemented in
+R as closely as possible. Due to the nature of stepwise backward elimination however, exact
+thresholds for predictor removal could not be fine tuned for every model designed for all 7
+districts. Overall, models created in R using the same parameters as those in SPSS had
+exceptionally close performance metrics.
+
+These results demonstrate that the current linear regression model approach is viable across
+platforms. 
+
+---
+
+## Coefficient-Concordance
+
+The coefficients represented on the graph below indicate: 1) The direction, and 2) The impact of a
+predictor on the dependent variable (for these models home value). Values close to zero have a 
+negligible impact on sale price. Strong negative values correlate with decreased sale price
+(e.g., unsound condition properties), high positive values correlated with increased sale price
+(e.g., properties in good condition).
+
+As SPSS and R coefficients overlap significantly, they produce a line with slope = 1 when plotted
+on opposite axes.
+
+```{r coefsetup}
+r_coefs <- purrr::imap_dfr(
+  r_models,
+  \(district_models, district) {
+    purrr::imap_dfr(
+      district_models,
+      \(mod, model) {
+        tibble(predictor = names(stats::coef(mod)),
+          r_coef = unname(stats::coef(mod)), district = district, model = model, source = "R")
+      }
+    )
+  }
+)
+
+dfsps$term <- tolower(dfsps$term)
+spss_coefs <- dfsps |> dplyr::rename(spss_coef = b) |> 
+  dplyr::mutate(
+    predictor = dplyr::case_when(term == "(constant)" ~ "(Intercept)", TRUE ~ term),
+    district = paste0("D", codd), model = paste0("M", model), source = "SPSS"
+  )
+
+coef_compare <- r_coefs |>
+  dplyr::inner_join(spss_coefs, by = c("district", "model", "predictor")) |>
+  dplyr::mutate(coef_diff = r_coef - spss_coef, abs_diff = abs(coef_diff))
+```
+
+```{r coefplot1, fig.dim=c(8,5)}
+# 1. Establish overall coefficient limits
+coef_min <- min(c(coef_compare$spss_coef, coef_compare$r_coef), na.rm = TRUE)
+coef_max <- max(c(coef_compare$spss_coef, coef_compare$r_coef), na.rm = TRUE)
+# 2.Split coefficients into two ranges Use midpoint so each SPSS/R coefficient pair stays together
+coef_compare_plot <- coef_compare |>
+  mutate(
+    coef_midpoint = (spss_coef + r_coef) / 2,
+    coef_range = case_when(coef_midpoint < 6  ~ "Below 6", coef_midpoint >= 6 ~ "6 and Above")
+  )
+# 3. LOWER-RANGE PANEL
+p_low <- coef_compare_plot |> filter(coef_range == "Below 6") |>
+  ggplot(aes(x = spss_coef, y = r_coef)) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", linewidth = 0.8, color = "black") +
+  geom_point(shape = 21, size = 3, stroke = 0.7,
+    fill = "#0072B2",       # R
+    color = "#D55E00",      # SPSS
+    alpha = 0.60
+  ) +
+  coord_equal(xlim = c(coef_min, 6), ylim = c(coef_min, 6), expand = FALSE) +
+  labs(title = "Coefficient < 6", x = "SPSS Coefficient", y = "R Coefficient") +
+  theme_minimal(base_size = 12) +
+  theme(panel.grid.minor = element_blank(),
+    plot.title = element_text(
+      face = "bold", hjust = 0.5), axis.title = element_text(face = "bold")
+  )
+# 4. UPPER-RANGE PANEL
+p_high <- coef_compare_plot |> filter(coef_range == "6 and Above") |>
+  ggplot(aes(x = spss_coef, y = r_coef)) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", linewidth = 0.8, color = "black") +
+  geom_point(shape = 21, size = 3, stroke = 0.7, fill = "#0072B2",       
+    color = "#D55E00", alpha = 0.60) +
+  coord_equal(xlim = c(6, coef_max), ylim = c(6, coef_max), expand = FALSE) +
+  labs(title = "Coefficient >= 6", x = "SPSS Coefficient", y = "R Coefficient") +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    plot.title = element_text(face = "bold", hjust = 0.5), axis.title = element_text(face = "bold")
+  )
+
+p_coef_split <-
+  p_low + p_high + plot_layout(widths = c(1.5, 1)) +
+  plot_annotation(title = "SPSS | R Coefficient Concordance",
+    subtitle = paste(
+      "Points on the dashed 1:1 line indicate equivalent", "coefficient estimates"
+    ), theme = theme(plot.title = element_text(face = "bold", size = 15))
+  )
+
+p_coef_split
+```
+
+---
+
+## Heatmap Overview
+
+The following figure highlights the similarity (or difference) of a metric from an R model
+compared to the SPSS created equivalent.
+
+```{r hmapplot, fig.dim=c(8,9), eval=FALSE}
+comparison |> mutate(model_label = paste0("Model ", model_num)) |>
+  ggplot(aes(x = metric_label, y = model_label, fill = discrepancy_score)) +
+  geom_tile(color = "white", linewidth = 0.7) +
+  facet_wrap(~ district, ncol = 2) + # geom_text(aes(label = difference_label), size = 2.4) +
+  scale_fill_gradientn(
+    colours = c("#1a9850", "#91cf60", "#fee08b", "#fc8d59", "#d73027"),
+    values = scales::rescale(c(0, 0.5, 1, 2, 3)), limits = c(0, 3),
+    oob = scales::squish, name = "R − SPSS" # |R − SPSS| /\nTolerance
+  ) +
+  labs(
+    title = "SPSS versus R Model Reproducibility", subtitle = "7 Districts × 5 AVM Specifications",
+    x = NULL, y = NULL) + theme_minimal(base_size = 11) +
+  theme(
+    panel.grid = element_blank(), strip.text = element_text(face = "bold", size = 11),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 8)
+  )
+```
+
+```{r hmapplot2, fig.dim=c(8,10)}
+p_strength <- ggplot(strength_df2, aes(x = metric_label2, y = row_id, fill = strength_scaled)) +
+  geom_tile(color = "white", linewidth = 0.7) +
+  geom_text(aes(label = diff_label), size = 2.75) +
+  scale_fill_gradient2(low = "#D55E00",     # worse for R
+    mid = "white", high = "#0072B2",    # better for R
+    midpoint = 0, limits = c(-1, 1), oob = scales::squish, name = "R relative\nto SPSS"
+  ) +
+  labs(
+    title = "R | SPSS Performance Metric Comparison", # Strength/Weakness Relative to SPSS
+    subtitle = "Blue = R higher; orange = R lower; cell text shows R − SPSS", #stronger, weaker
+    x = NULL, y = NULL
+  ) + theme_minimal(base_size = 11) +
+  theme(
+    panel.grid = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1, face = "bold"),
+    axis.text.y = element_text(size = 9, face = "bold"),
+    plot.title = element_text(face = "bold", size = 15), legend.position = "bottom"
+  )
+p_strength
+```
+
+```{r hmapplot3, fig.dim=c(8,10), eval=FALSE}
+strength_df_facet <- strength_df |>
+  mutate(
+    district_label = paste0("District ", district_num),
+    model_label = factor(paste0("Model ", model_num),
+      levels = rev(paste0("Model ", sort(unique(model_num)))))
+  )
+
+p_strength_facet <- ggplot(
+  strength_df_facet, aes(x = metric_label, y = model_label,  fill = strength_scaled)) +
+  geom_tile(color = "white", linewidth = 0.7) +
+  # geom_text(aes(label = diff_label), size = 2.4) +
+  facet_wrap(~ district_label, ncol = 2) +
+  scale_fill_gradient2(low = "#D55E00", mid = "white",  high = "#0072B2", midpoint = 0,
+    limits = c(-1, 1), oob = scales::squish, name = "R relative\nto SPSS") +
+  labs(title = "R Strength/Weakness Relative to SPSS",
+    subtitle = "Blue = R stronger; orange = R weaker", x = NULL, y = NULL) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid = element_blank(), strip.text = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 9, face = "bold"),
+    axis.text.y = element_text(face = "bold"),
+    plot.title = element_text(face = "bold", size = 16), panel.spacing = grid::unit(0.8, "cm")
+  )
+p_strength_facet
+```
+
+---
+
+## Metric Comparison
+
+The following dumbbell plots identify overlap (or disparity) of specific metric values from R and
+SPSS models, arranged by district.
+
+```{r db1}
+prep_dumbbell_data <- function(data, metric_name) {
+  plot_df <- data |> dplyr::filter(metric == metric_name) |>
+    dplyr::mutate(
+      district_num = readr::parse_number(as.character(district)),
+      model_num    = readr::parse_number(as.character(model)),
+      district_lab = paste0("District ", district_num),
+      model_lab    = paste0("Model ", model_num),
+      difference   = r_value - spss_value,
+      midpoint     = (r_value + spss_value) / 2
+    ) |> dplyr::arrange(district_num, model_num) |>
+    dplyr::mutate(
+      district_lab = factor(
+        district_lab, levels = paste0("District ", sort(unique(district_num)))
+      ),    # reverse so Model 1 is at the top
+      model_lab = factor(model_lab, levels = rev(paste0("Model ", sort(unique(model_num))))),
+      row_group = dplyr::case_when(
+        district_num %in% c(1, 2) ~ 1, district_num %in% c(3, 4) ~ 2,
+        district_num %in% c(5, 6) ~ 3, district_num %in% c(7)    ~ 4
+      )
+    )
+  
+  point_df <- plot_df |>
+    dplyr::select(district_num, district_lab, row_group, model_lab, spss_value, r_value) |>
+    tidyr::pivot_longer(
+      cols = c(spss_value, r_value), names_to = "Software", values_to = "value"
+    ) |>
+    dplyr::mutate(
+      Software = dplyr::case_when(
+        Software == "spss_value" ~ "SPSS", Software == "r_value" ~ "R", TRUE ~ Software
+      )
+    )
+  list(plot_df = plot_df, point_df = point_df)
+}
+
+make_dumbbell_column <- function(
+    plot_df, point_df, districts_keep, side = c("left", "right")) {
+  side <- match.arg(side)
+  plot_df_sub <- plot_df |>
+    dplyr::filter(district_num %in% districts_keep) |>
+    dplyr::mutate(facet_row = factor(row_group, levels = 1:4))
+
+  point_df_sub <- point_df |> dplyr::filter(district_num %in% districts_keep) |>
+    dplyr::mutate(facet_row = factor(row_group, levels = 1:4))
+
+  facet_labels <- if (side == "left") {
+    c(`1` = "District 1", `2` = "District 3", `3` = "District 5", `4` = "District 7")
+  } else {
+    c(`1` = "District 2", `2` = "District 4", `3` = "District 6", `4` = "")   # blank fourth row
+  }
+
+  ggplot() +
+    geom_segment(
+      data = plot_df_sub, aes(x = spss_value, xend = r_value, y = model_lab, yend = model_lab),
+      linewidth = 1, color = "grey60"
+    ) +
+    geom_point(data = point_df_sub, aes(x = value, y = model_lab, color = Software), size = 3.5) +
+    facet_wrap(
+      ~ facet_row, ncol = 1, drop = FALSE, labeller = labeller(facet_row = facet_labels)
+    ) + scale_color_manual(values = c("SPSS" = "#D55E00", "R" = "#0072B2")) +
+    labs(x = NULL, y = NULL, color = NULL) + theme_minimal(base_size = 12) +
+    theme(
+      panel.grid.major.y = element_blank(),
+      panel.grid.minor = element_blank(), panel.spacing.y = grid::unit(0.8, "cm"),
+      strip.text = element_text(face = "bold", size = 11), strip.background = element_blank(),
+      axis.text.y = element_blank(), axis.ticks.y = element_blank(), legend.position = "none"
+    )
+}
+
+make_center_model_axis <- function() {
+  center_df <- expand.grid(
+    row_group = factor(1:4),
+    model_lab = factor(rev(paste0("Model ", 1:5)), levels = rev(paste0("Model ", 1:5)))
+  )
+  
+  ggplot(center_df, aes(x = 1, y = model_lab, label = model_lab)) +
+    geom_text(fontface = "bold", size = 4) + facet_wrap(~ row_group, ncol = 1) +
+    scale_x_continuous(limits = c(0.8, 1.2)) + labs(x = NULL, y = NULL) +
+    theme_void(base_size = 12) +
+    theme(panel.spacing.y = grid::unit(0.9, "cm"), strip.text = element_blank())
+}
+
+make_dumbbell_center_axis <- function(data, metric_name, metric_title = metric_name) {
+  dat      <- prep_dumbbell_data(data, metric_name)
+  plot_df  <- dat$plot_df
+  point_df <- dat$point_df
+  
+  p_left <- make_dumbbell_column(
+    plot_df = plot_df, point_df = point_df, districts_keep = c(1, 3, 5, 7), side = "left"
+  )
+  
+  p_mid <- make_center_model_axis()
+  
+  p_right <- make_dumbbell_column(
+    plot_df = plot_df, point_df = point_df, districts_keep = c(2, 4, 6), side = "right"
+  )
+  
+  legend_plot <- ggplot(point_df, aes(x = value, y = model_lab, color = Software)) + geom_point() +
+    scale_color_manual(values = c("SPSS" = "#D55E00", "R" = "#0072B2")) +
+    theme_void() + theme(legend.position = "top", axis.text.x = element_text(face = "bold"))
+  
+  leg <- cowplot::get_legend(legend_plot)
+  
+  body <- cowplot::plot_grid(
+    p_left, p_mid, p_right, nrow = 1, rel_widths = c(1, 0.18, 1), align = "h", axis = "tb"
+  )
+  
+  title <- ggdraw() +
+    draw_label(
+      paste0(metric_title, ": SPSS | R"), x = 0, hjust = 0, fontface = "bold", size = 15
+    )
+  
+  subtitle <- ggdraw() +
+    draw_label(
+      "Each line connects the SPSS and R result for the same AVM", x = 0, hjust = 0, size = 12
+    )
+  
+  xlab <- ggdraw() + draw_label(metric_title, size = 13, fontface = "bold")
+  
+  cowplot::plot_grid(
+    title, subtitle, leg, body, xlab, ncol = 1, rel_heights = c(0.06, 0.05, 0.06, 1, 0.05)
+  )
+}
+```
+
+### Adjusted R²
+
+```{r adjr2, fig.dim=c(8,8)}
+p_adj_r2 <- make_dumbbell_center_axis(
+  comparison, metric_name = "adj_r_squared", metric_title = "Adjusted R²"
+)
+p_adj_r2
+```
+
+### Median Ratio
+
+```{r med, fig.dim=c(8,8)}
+p_med <- make_dumbbell_center_axis(
+  comparison, metric_name = "median_ratio", metric_title = "Median Ratio"
+)
+p_med
+```
+
+### Coefficient of Dispersion
+
+```{r cod, fig.dim=c(8,8)}
+p_cod <- make_dumbbell_center_axis(
+  comparison, metric_name = "COD", metric_title = "Coefficient of Dispersion"
+)
+p_cod
+```
+
+### Price Related Differential
+
+```{r prd, fig.dim=c(8,8)}
+p_prd <- make_dumbbell_center_axis(
+  comparison, metric_name = "PRD", metric_title = "Price Related Differential"
+)
+p_prd
+```
+
+### Price Related Bias
+
+```{r prb, fig.dim=c(8,8)}
+p_prb <- make_dumbbell_center_axis(
+  comparison, metric_name = "PRB", metric_title = "Price Related Bias"
+)
+p_prb
+```
+
+```{r coefcheck, eval=FALSE}
+coef_compare |> dplyr::count(district, model)
+dplyr::anti_join(r_coefs, spss_coefs, by = c("district", "model", "predictor"))
+```
+
+```{r coefplot2, eval=FALSE}
+coef_compare <- coef_compare |>
+  dplyr::mutate(district_num = readr::parse_number(district),
+    model_num = readr::parse_number(model),
+    district = factor(district, levels = paste0("D", 1:7), labels = paste0("District ", 1:7)),
+    model = factor(model, levels = paste0("M", 1:5), labels = paste0("Model ", 1:5))
+  )
+
+p_coef <- ggplot(coef_compare, aes(x = spss_coef, y = r_coef)) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", linewidth = 0.7, color = "grey40") +
+  geom_point(size = 2, alpha = 0.8) +
+  facet_grid(rows = vars(district), cols = vars(model)) +  coord_equal() +
+  labs(
+    title = "SPSS vs R Coefficient Concordance",
+    subtitle = "Seven districts × five AVM specifications",
+    x = "SPSS Coefficient", y = "R Coefficient"
+  ) +  theme_minimal(base_size = 10) +
+  theme(
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(face = "bold"), plot.title = element_text(face = "bold", size = 16)
+  )
+
+p_coef
+```
+
+
+```{r iaao}
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,65 @@
+---
+title: "Linear Regression Models by Council District"
+author: |
+  | Elliot Dean - Program Analyst IV  
+  | Office of the Chief Financial Officer | Office of the Assessor
+  | City of Detroit
+date: "`r sub('^0', '', format(Sys.Date(), '%d %B %Y'))`"
+geometry: margin = 1.5cm
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+mainfont: Arial
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, error = FALSE, echo = FALSE)
+```
+
+```{r lib_load}
+library(tidyverse)   # data wrangling & ggplot2
+library(janitor)     # functions for examining and cleaning dirty data
+library(kableExtra)  # simple table generator
+library(here)        # Find files within a project
+library(olsrr)       # package for p-value backward elimination
+library(broom)       # summarizes key information about models
+library(rlang)       # functions for Base Types and Core R and 'Tidyverse' Features
+library(car)         # VIF, influence measures helpers
+library(scales)      # provides the internal scaling infrastructure used by ggplot
+library(fastDummies) # Fast Creation of Dummy (Binary) Columns & Rows from Categorical Variables
+```
+
+---
+
+```{r fun}
+load(file = here("rmds/modfunctions", "modfunctions13.RData"))
+```
+
+```{r data_import}
+df <- read_csv(here("data/city", "salesSFapr2023toMarch2025Updated.csv")) |>
+  rename_with(tolower) |> filter(ccd == 1)
+
+res23    <- prep_cod_sales(df, origin_month = as.Date("2023-04-01"))
+df       <- res23$data
+ecfs_col <- res23$ecfs_col
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

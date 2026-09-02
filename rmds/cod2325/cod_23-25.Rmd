@@ -1,0 +1,937 @@
+---
+title: "Citywide Model: 2023 - 2025 Sales"
+author: |
+  | Elliot Dean - Program Analyst IV  
+  | Office of the Chief Financial Officer | Office of the Assessor
+  | City of Detroit
+date: "`r sub('^0', '', format(Sys.Date(), '%d %B %Y'))`"
+geometry: margin = 1.5cm
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: false
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, error = FALSE, echo = FALSE)
+```
+
+```{r lib_load}
+library(tidyverse)   # data wrangling & ggplot2
+library(janitor)     # functions for examining and cleaning dirty data
+library(here)        # Find files within a project
+library(olsrr)       # package for p-value backward elimination
+library(broom)
+```
+
+```{r fun}
+get_time_params <- function(model, data,
+                            var1 = "MONTHS_6TO22",
+                            var2 = "MONTHS_23TO30",
+                            end = c("max", "last_obs")) {
+  end <- match.arg(end)
+  
+  coefs <- coef(model)
+  
+  if (!all(c(var1, var2) %in% names(coefs))) {
+    stop("Time variables ", var1, " and/or ", var2,
+         " are not in the model coefficients. ",
+         "Make sure they weren't removed by stepwise selection.")
+  }
+  
+  b1 <- unname(coefs[var1])
+  b2 <- unname(coefs[var2])
+  
+  rate1 <- exp(b1) - 1
+  rate2 <- exp(b2) - 1
+  
+  # pick the end-month exponents
+  if (!all(c(var1, var2) %in% names(data))) {
+    stop("Columns ", var1, " and/or ", var2,
+         " not found in the data used for time params.")
+  }
+  
+  if (end == "max") {
+    # use max values across data (rough analogue to "latest month")
+    m1_end <- max(data[[var1]], na.rm = TRUE)
+    m2_end <- max(data[[var2]], na.rm = TRUE)
+  } else if (end == "last_obs") {
+    # use the last observation in time
+    idx_last <- which.max(data[["MONTHS"]])  # assumes MONTHS exists too
+    m1_end <- data[[var1]][idx_last]
+    m2_end <- data[[var2]][idx_last]
+  }
+  
+  end_index <- (1 + rate1)^m1_end * (1 + rate2)^m2_end
+  
+  list(
+    b1        = b1,
+    b2        = b2,
+    RATE1     = rate1,
+    RATE2     = rate2,
+    M6TO22_end = m1_end,
+    M23TO30_end = m2_end,
+    END_INDEX = end_index
+  )
+}
+```
+
+```{r data_import}
+# ---- 1. Load data & normalize names ----
+df <- read_csv(here("data", "salesSFapr2023toMarch2025Updated.csv")) |>
+  rename_with(toupper)    # clean_names()
+```
+
+```{r dataorg1}
+############################################################
+# PART A: SPSS REGRESSION PREP FOR LN_SPPSF
+############################################################
+
+# ---- 2. Restrict to SINGLE FAMILY / 1/2 DUPLEX and dedupe ----
+
+df <- df %>%
+  mutate(
+    # SRESB_STYLE should be in the .sav; adjust if named slightly differently
+    IN_STYLE = if_else(SRESB_STYLE %in% c("SINGLE FAMILY", "1/2 DUPLEX"), 1L, 0L)
+  ) %>%
+  filter(IN_STYLE == 1L) %>%
+  select(-IN_STYLE)
+
+# De-duplicate by PARCELNO, SALEPRICE, SALEDATE (keep last per group)
+df <- df %>%
+  arrange(PARCELNO, SALEPRICE, SALEDATE) %>%
+  group_by(PARCELNO, SALEPRICE, SALEDATE) %>%
+  mutate(
+    PRIMARY_LAST = as.integer(row_number() == n())
+  ) %>%
+  ungroup() %>%
+  filter(PRIMARY_LAST == 1L) %>%
+  select(-PRIMARY_LAST)
+
+# ---- 3. Remove non-market sales (PRICE ≈ ASSESSMENT) ----
+
+# AVWHENSOLD should be in the .sav; if not, update this field name
+df <- df %>%
+  mutate(
+    PRICEISASMT_RATIO  = AVWHENSOLD / SALEPRICE,
+    PRICEISASMT_RATIO2 = PRICEISASMT_RATIO,
+    PRICEISASMT_RATIO2 = if_else(
+      PRICEISASMT_RATIO >= 0.90 & PRICEISASMT_RATIO <= 1.10,
+      1, PRICEISASMT_RATIO2
+    ),
+    PRICEISASMT_RATIO = PRICEISASMT_RATIO2,
+    PRICEISASMT       = if_else(PRICEISASMT_RATIO == 1, 0L, 1L)
+  ) %>%
+  filter(PRICEISASMT == 1L) %>%
+  select(-PRICEISASMT_RATIO2)
+
+# ---- 4. Basic outlier filters ----
+
+# sTOTALSQFT, SRESB_FLOORAREA, SALEPRICE should all exist
+df <- df %>%
+  mutate(
+    OUT = 0L,
+    OUT = if_else(STOTALSQFT < 400, 1L, OUT),
+    OUT = if_else(SRESB_FLOORAREA < 400, 1L, OUT),
+    OUT = if_else(SALEPRICE < 10000, 1L, OUT)
+  ) %>%
+  filter(OUT == 0L) %>%
+  select(-OUT)
+
+# ---- 5. SPPSF & LN_SPPSF ----
+
+df <- df %>%
+  mutate(
+    SPPSF    = SALEPRICE / SRESB_FLOORAREA,
+    LN_SPPSF = log(SPPSF)
+  )
+```
+
+```{r dataorg2}
+############################################################
+# 6–15: DUMMIES / TRANSFORMS MATCHING SPSS
+############################################################
+
+# ---- 6. Story & style dummies ----
+
+df <- df %>%
+  mutate(
+    ONESTORY = if_else(SRESB_STYHGT <= 2, 1L, 0L),
+    TWOSTORY = if_else(SRESB_STYHGT > 2 & SRESB_STYHGT <= 5, 1L, 0L),
+    
+    SINGLE_FAMILY1STORY = if_else(
+      SRESB_STYLE == "SINGLE FAMILY" & ONESTORY == 1L, 1L, 0L
+    ),
+    # SINGLE_FAMILY2STORY is base (no dummy created)
+    HALF_DUPLEX1STORY = if_else(
+      SRESB_STYLE == "1/2 DUPLEX" & ONESTORY == 1L, 1L, 0L
+    ),
+    HALF_DUPLEX2STORY = if_else(
+      SRESB_STYLE == "1/2 DUPLEX" & TWOSTORY == 1L, 1L, 0L
+    )
+  )
+
+# ---- 7. Year-built eras & dummies ----
+
+df <- df %>%
+  mutate(
+    ERABUILT = case_when(
+      SRESB_YEARBUILT < 1910 ~ 1L,
+      SRESB_YEARBUILT >= 1910 & SRESB_YEARBUILT < 1930 ~ 2L,
+      SRESB_YEARBUILT >= 1930 & SRESB_YEARBUILT < 1946 ~ 3L,
+      SRESB_YEARBUILT >= 1946 & SRESB_YEARBUILT < 1961 ~ 4L,
+      SRESB_YEARBUILT >= 1961 & SRESB_YEARBUILT <= 1990 ~ 5L,
+      SRESB_YEARBUILT > 1990 ~ 6L,
+      TRUE ~ 0L
+    ),
+    YB_PRE_1929     = if_else(ERABUILT %in% c(1L, 2L), 1L, 0L),
+    YB_1946_TO_1960 = if_else(ERABUILT == 4L, 1L, 0L),
+    YB_POST_1961    = if_else(ERABUILT %in% c(5L, 6L), 1L, 0L)
+  )
+
+# ---- 8. Condition dummies (GOOD, FAIR, POOR, VERY_POOR_UNSOUND) ----
+# SCOND: base == 3 (Average)
+
+df <- df %>%
+  mutate(
+    GOOD              = if_else(SCOND == 2, 1L, 0L, missing = 0L),
+    FAIR              = if_else(SCOND == 4, 1L, 0L, missing = 0L),
+    POOR              = if_else(SCOND == 5, 1L, 0L, missing = 0L),
+    VERY_POOR_UNSOUND = if_else(SCOND %in% c(6, 7), 1L, 0L, missing = 0L)
+  )
+
+# ---- 9. Bathrooms dummies ----
+
+df <- df %>%
+  mutate(
+    TWO_PLUS_BATHS = if_else(SRESB_FULLBATHS >= 2, 1L, 0L, missing = 0L),
+    POWDER_ROOM    = if_else(SRESB_HALFBATHS >= 1 & SRESB_HALFBATHS <= 5,
+                             1L, 0L, missing = 0L)
+  )
+
+# ---- 10. Fireplace dummy ----
+
+df <- df %>%
+  mutate(
+    FIREPLACE = if_else(SRESB_FIREPLACE %in% 1:6, 1L, 0L, missing = 0L)
+  )
+
+# ---- 11. Quality dummies ----
+
+df <- df %>%
+  mutate(
+    QABOVE_AVG      = if_else(SRESB_BLDGCLASS %in% c(3,4,5), 1L, 0L, missing = 0L),
+    QBELOW_AVG_POOR = if_else(SRESB_BLDGCLASS %in% c(0,1),   1L, 0L, missing = 0L)
+    # SRESB_BLDGCLASS == 2 is base
+  )
+
+# ---- 12. Basement / crawl / slab ----
+# Needs SRESB_CRAWSPACE, SRESB_SLABAREA, SRESB_GROUNDAREA, SRESB_BASEMENTAREA
+
+df <- df %>%
+  mutate(
+    PCTCRAWL = SRESB_CRAWSPACE    / SRESB_GROUNDAREA,
+    PCTSLAB  = SRESB_SLABAREA     / SRESB_GROUNDAREA,
+    PCTBSMNT = SRESB_BASEMENTAREA    / SRESB_GROUNDAREA,
+    CRAWL    = if_else(PCTCRAWL > PCTBSMNT & PCTCRAWL > PCTSLAB, 1L, 0L, missing = 0L),
+    SLAB     = if_else(PCTSLAB  > PCTCRAWL & PCTSLAB  > PCTBSMNT, 1L, 0L, missing = 0L)
+    # BASEMENT is base
+  )
+
+# ---- 13. Garage spaces ----
+
+df <- df %>%
+  mutate(
+    GARAGESPACES = case_when(
+      SRESB_GARAGEAREA > 200 & SRESB_GARAGEAREA < 420 ~ 1L,
+      SRESB_GARAGEAREA > 419 & SRESB_GARAGEAREA < 600 ~ 2L,
+      SRESB_GARAGEAREA > 599 & SRESB_GARAGEAREA < 820 ~ 3L,
+      SRESB_GARAGEAREA > 819                          ~ 4L,
+      TRUE ~ 0L
+    ),
+    LN_GARAGESPACES = if_else(GARAGESPACES > 0L, log(GARAGESPACES), NA_real_)
+  )
+
+# ---- 14. Street class & heating/cooling ----
+
+df <- df %>%
+  mutate(
+    ARTERIAL   = if_else(RD_CLASS == "A31", 1L, 0L, missing = 0L),
+    HOT_WATER  = if_else(SRESB_HEAT == 2, 1L, 0L, missing = 0L),
+    CENTRAL_AIR = if_else(SRESB_HEAT == 9, 1L, 0L, missing = 0L)
+  )
+
+# ---- 15. Size buckets ----
+
+df <- df %>%
+  mutate(
+    SIZE = case_when(
+      SRESB_FLOORAREA < 830 ~ 1L,
+      SRESB_FLOORAREA >= 830  & SRESB_FLOORAREA < 1018 ~ 2L,
+      SRESB_FLOORAREA >= 1018 & SRESB_FLOORAREA < 1255 ~ 3L,
+      SRESB_FLOORAREA >= 1255 & SRESB_FLOORAREA < 1632 ~ 4L,
+      SRESB_FLOORAREA >= 1632 ~ 5L,
+      TRUE ~ 0L
+    ),
+    SMALLEST = if_else(SIZE == 1L, 1L, 0L),
+    SMALL    = if_else(SIZE == 2L, 1L, 0L),
+    LARGE    = if_else(SIZE == 4L, 1L, 0L),
+    LARGEST  = if_else(SIZE == 5L, 1L, 0L)
+    # SIZE == 3 is base
+  )
+
+############################################################
+# 16. Time variables + SCOND filter (AVERAGE)
+############################################################
+
+df <- df %>%
+  mutate(
+    SMONTH = month(SALEDATE),
+    SYEAR  = year(SALEDATE),
+    MONTHS = case_when(
+      SYEAR == 2022 ~ SMONTH + 0L,
+      SYEAR == 2023 ~ SMONTH + 12L,
+      SYEAR == 2024 ~ SMONTH + 24L,
+      TRUE          ~ NA_integer_
+    ),
+    AVERAGE = if_else(SCOND == 4, 1L, 0L, missing = 0L)
+  ) %>%
+  filter(AVERAGE == 1L) %>%
+  mutate(
+    MONTHS_6TO22  = MONTHS,
+    MONTHS_6TO22  = if_else(MONTHS > 22L, 22L, MONTHS_6TO22),
+    MONTHS_23TO30 = if_else(MONTHS > 22L, MONTHS - 22L, 0L)
+  )
+```
+
+```{r mod1}
+############################################################
+# 17. LN_SPPSF full model + backward elimination
+############################################################
+
+mod_ln_sppsf_full <- lm(
+  LN_SPPSF ~ ARTERIAL +
+    SINGLE_FAMILY1STORY +
+    HALF_DUPLEX1STORY + HALF_DUPLEX2STORY +
+    SMALLEST + SMALL + LARGE + LARGEST +
+    TWO_PLUS_BATHS + POWDER_ROOM +
+    GOOD + FAIR + POOR + VERY_POOR_UNSOUND +
+    QABOVE_AVG + QBELOW_AVG_POOR +
+    YB_PRE_1929 + YB_1946_TO_1960 + YB_POST_1961 +
+    CRAWL + SLAB +
+    LN_GARAGESPACES + FIREPLACE +
+    HOT_WATER + CENTRAL_AIR +
+    MONTHS_6TO22 + MONTHS_23TO30,
+  data = df
+)
+
+# SPSS-style backward by p-value
+mod_ln_sppsf_back <- ols_step_backward_p(
+  model   = mod_ln_sppsf_full,
+  pent    = 0.05,
+  prem    = 0.10,
+  details = FALSE
+)$model
+
+summary(mod_ln_sppsf_full)
+summary(mod_ln_sppsf_back)
+
+# Number of observations in the model
+n_mod <- nobs(mod_ln_sppsf_back)
+
+# Get the rows from df that were actually used in the model
+mf <- model.frame(mod_ln_sppsf_back)
+idx <- as.integer(rownames(mf))  # row indices in df
+
+# Work only on those rows
+df_in <- df[idx, ] %>%
+  mutate(
+    COOK_1 = cooks.distance(mod_ln_sppsf_back),
+    SDR_1  = rstandard(mod_ln_sppsf_back),
+    IN_FLAG = if_else(
+      COOK_1 <= 4 / n_mod & abs(SDR_1) <= 2,
+      1L, 0L
+    )
+  )
+# After filtering outliers
+df_in <- df_in %>% filter(IN_FLAG == 1L)
+
+# ---- 20. First time adjustment (RATE1 & RATE2 set #1) ----
+time_params <- get_time_params(mod_ln_sppsf_back, df_in, end = "max")
+# $b1, $b2           # raw coefficients
+# $RATE1, $RATE2     # per-month rates
+# $M6TO22_end, $M23TO30_end
+# $END_INDEX
+
+RATE1     <- time_params$RATE1
+RATE2     <- time_params$RATE2
+END_INDEX <- time_params$END_INDEX
+
+df_in <- df_in %>%
+  mutate(
+    PRICE_INDEX = (1 + RATE1)^MONTHS_6TO22 * (1 + RATE2)^MONTHS_23TO30,
+    TAF        = END_INDEX / PRICE_INDEX,
+    TASP       = SALEPRICE * TAF,
+    TASPPSF    = TASP / SRESB_FLOORAREA,
+    LN_TASP    = log(TASP)
+  )
+```
+
+```{r mod1a}
+############################################################
+# 18. Diagnostics & ggplot charts for LN_SPPSF model
+############################################################
+
+# 1) Get the rows that were actually used by the model
+mf <- model.frame(mod_ln_sppsf_back)          # model frame
+row_idx <- as.integer(rownames(mf))           # row numbers in df
+
+# 2) Subset df to those rows and augment
+aug_sppsf <- augment(mod_ln_sppsf_back, data = df[row_idx, ]) %>%
+  mutate(
+    # back-transform from log if LN_SPPSF = log(SPPSF)
+    PRED_SPPSF = exp(.fitted),
+    STD_RESID  = .std.resid
+  )
+
+# 3) Histogram of standardized residuals + normal curve
+stats_resid <- aug_sppsf %>%
+  summarise(
+    MEAN = mean(STD_RESID, na.rm = TRUE),
+    SD   = sd(STD_RESID,   na.rm = TRUE),
+    N    = sum(!is.na(STD_RESID))
+  )
+
+mu <- stats_resid$MEAN
+sd_ <- stats_resid$SD
+n_  <- stats_resid$N
+binwidth <- 0.25
+
+ggplot(aug_sppsf, aes(x = STD_RESID)) +
+  geom_histogram(binwidth = binwidth, color = "black", fill = "steelblue") +
+  stat_function(
+    fun = function(x) dnorm(x, mean = mu, sd = sd_) * n_ * binwidth,
+    size = 1
+  ) +
+  labs(
+    title = "Histogram\nDependent Variable: LN_SPPSF",
+    x = "Regression Standardized Residual",
+    y = "Frequency"
+  ) +
+  annotate(
+    "text",
+    x = Inf, y = Inf,
+    hjust = 1.1, vjust = 1.5,
+    label = sprintf("Mean = %.3f\nStd. Dev. = %.3f\nN = %d", mu, sd_, n_)
+  ) +
+  theme_minimal()
+```
+
+```{r mod1p}
+# 4) Residuals vs MONTHS
+ggplot(aug_sppsf, aes(x = MONTHS, y = STD_RESID)) +
+  geom_point(alpha = 0.5, size = 1.2) +
+  geom_smooth(method = "loess", se = FALSE, color = "red") +
+  geom_vline(xintercept = c(10, 20), linetype = "dashed") +
+  labs(x = "MONTHS", y = "Standardized residual") +
+  theme_minimal()
+```
+
+```{r rstats}
+############################################################
+# PART B: TIME-ADJUSTED MODELS, RATIOS, CLUSTERS
+############################################################
+
+# ---- 19. Helper functions for ratio stats & within bands ----
+
+ratio_stats_single <- function(actual, pred) {
+  ok <- is.finite(actual) & is.finite(pred)
+  a  <- actual[ok]
+  p  <- pred[ok]
+  n  <- length(a)
+  if (n == 0) {
+    return(tibble(
+      N = 0L,
+      MEDIAN_RATIO   = NA_real_,
+      MEAN_RATIO     = NA_real_,
+      WGT_MEAN_RATIO = NA_real_,
+      PRD = NA_real_,
+      COD = NA_real_,
+      PRB = NA_real_
+    ))
+  }
+  r   <- p / a
+  med <- median(r, na.rm = TRUE)
+  mean_r <- mean(r, na.rm = TRUE)
+  wgt_mean_r <- sum(p, na.rm = TRUE) / sum(a, na.rm = TRUE)
+  
+  # COD
+  cod <- 100 * mean(abs(r - med), na.rm = TRUE) / med
+  
+  # PRD
+  prd <- mean_r / wgt_mean_r
+  
+  # PRB (approximate IAAO approach)
+  vproxy <- (p + a) / 2
+  dev_pct <- (r - med) / med * 100
+  x <- log(vproxy) - mean(log(vproxy), na.rm = TRUE)
+  prb <- tryCatch({
+    coef(lm(dev_pct ~ x))[["x"]] / 100
+  }, error = function(e) NA_real_)
+  
+  tibble(
+    N = n,
+    MEDIAN_RATIO   = med,
+    MEAN_RATIO     = mean_r,
+    WGT_MEAN_RATIO = wgt_mean_r,
+    PRD = prd,
+    COD = cod,
+    PRB = prb
+  )
+}
+
+ratio_stats_by <- function(data, group_var, actual, pred) {
+  gsym <- rlang::enquo(group_var)
+  asy  <- rlang::enquo(actual)
+  psy  <- rlang::enquo(pred)
+  
+  data %>%
+    group_by(!!gsym, .drop = FALSE) %>%
+    group_modify(~ ratio_stats_single(.x %>% pull(!!asy),
+                                      .x %>% pull(!!psy))) %>%
+    ungroup()
+}
+
+within_band_flags <- function(pred, actual,
+                              band10 = 0.10,
+                              band20 = 0.20,
+                              band50 = 0.50) {
+  ratio <- pred / actual
+  tibble(
+    WITHIN10 = if_else(!is.na(ratio) & ratio <= 1 + band10 & ratio >= 1 - band10, 1L, 0L),
+    WITHIN20 = if_else(!is.na(ratio) & ratio <= 1 + band20 & ratio >= 1 - band20, 1L, 0L),
+    WITHIN50 = if_else(!is.na(ratio) & ratio <= 1 + band50 & ratio >= 1 - band50, 1L, 0L)
+  )
+}
+```
+
+```{r datareorg}
+# ---- 21. Building & lot size ratios ----
+
+# By style: base building size
+# Building size transforms: base by style, ratios, logs
+
+df <- df %>%
+  # we already filtered earlier to SINGLE FAMILY / 1/2 DUPLEX,
+  # so this gives one median per style
+  group_by(SRESB_STYLE) %>%
+  mutate(
+    BASE_BLDGSIZE = median(SRESB_FLOORAREA, na.rm = TRUE)
+  ) %>%
+  ungroup() %>%
+  mutate(
+    BASE_BLDGSIZE_RATIO    = SRESB_FLOORAREA / BASE_BLDGSIZE,
+    LN_BASE_BLDGSIZE_RATIO = log(BASE_BLDGSIZE_RATIO),
+    # alternative centered size (like LNSBLDSFINT in SPSS)
+    SBLDSFINT   = SRESB_FLOORAREA - 400,
+    LNSBLDSFINT = if_else(SBLDSFINT > 0, log(SBLDSFINT), NA_real_)
+  )
+
+# By style: base lot size
+# Lot size & landratio transforms: base by style, ratios, logs
+
+df <- df %>%
+  group_by(SRESB_STYLE) %>%
+  mutate(
+    BASE_LOTSIZE = median(STOTALSQFT, na.rm = TRUE)
+  ) %>%
+  ungroup() %>%
+  mutate(
+    BASE_LOTSIZE_RATIO     = STOTALSQFT / BASE_LOTSIZE,
+    LN_BASE_LOTSIZE_RATIO  = log(BASE_LOTSIZE_RATIO),
+    LANDRATIO  = STOTALSQFT / BASE_LOTSIZE,
+    LANDRATIO2 = case_when(
+      LANDRATIO >= 0.90 & LANDRATIO <= 1.10 ~ 1,
+      SRESB_STYLE != "SINGLE FAMILY" & LANDRATIO > 3 ~ 3,
+      SRESB_STYLE == "SINGLE FAMILY" & LANDRATIO > 4 ~ 4,
+      TRUE ~ LANDRATIO
+    ),
+    LN_LANDRATIO = log(LANDRATIO2)
+  )
+
+# ---- 22. CLUSTER_ID as factor ----
+
+if ("CLUSTER_ID" %in% names(df)) {
+  df <- df %>%
+    mutate(CLUSTER_ID = as.factor(CLUSTER_ID))
+}
+```
+
+```{r mod2}
+# ---- 23. LN_PRICE model (no ECFs) & outlier flag (Cook's D + SD resid) ----
+
+df <- df %>%
+  mutate(
+    LN_PRICE = log(SALEPRICE)
+  )
+
+mod_ln_price_full <- lm(
+  LN_PRICE ~ LN_LANDRATIO + LN_BASE_BLDGSIZE_RATIO +
+    ARTERIAL +
+    SINGLE_FAMILY1STORY +
+    HALF_DUPLEX1STORY + HALF_DUPLEX2STORY +
+    SMALLEST + SMALL + LARGE + LARGEST +
+    TWO_PLUS_BATHS + POWDER_ROOM +
+    GOOD + FAIR + POOR + VERY_POOR_UNSOUND +
+    QABOVE_AVG + QBELOW_AVG_POOR +
+    YB_PRE_1929 + YB_1946_TO_1960 + YB_POST_1961 +
+    CRAWL + SLAB +
+    LN_GARAGESPACES + FIREPLACE +
+    HOT_WATER + CENTRAL_AIR +
+    MONTHS_6TO22 + MONTHS_23TO30,
+  data = df
+)
+
+mod_ln_price_back <- stats::step(
+  mod_ln_price_full,
+  direction = "backward",
+  trace = FALSE
+)
+
+# Outlier filter like SPSS:
+# ---- Outlier filter like SPSS: Cook's D + standardized residuals ----
+
+# Number of observations in the model
+n_mod <- nobs(mod_ln_price_back)
+
+# Get the rows from df that were actually used in the model
+mf <- model.frame(mod_ln_price_back)
+idx <- as.integer(rownames(mf))  # row indices in df
+
+# Work only on those rows
+df_in <- df[idx, ] %>%
+  mutate(
+    COOK_1 = cooks.distance(mod_ln_price_back),
+    SDR_1  = rstandard(mod_ln_price_back),
+    IN_FLAG = if_else(
+      COOK_1 <= 4 / n_mod & abs(SDR_1) <= 2,
+      1L, 0L
+    )
+  )
+
+# If you want to see how many made it through:
+# df_in %>% count(IN_FLAG)
+
+# ---- 24. Final time adjustment (RATE1 & RATE2 set #2) & LN_TASP ----
+
+# After filtering outliers
+df_in <- df_in %>% filter(IN_FLAG == 1L)
+
+time_params2 <- get_time_params(mod_ln_price_back, df_in, end = "max")
+
+RATE1_2     <- time_params2$RATE1
+RATE2_2     <- time_params2$RATE2
+END_INDEX_2 <- time_params2$END_INDEX
+
+df_in <- df_in %>%
+  mutate(
+    PRICE_INDEX_2 = (1 + RATE1_2)^MONTHS_6TO22 * (1 + RATE2_2)^MONTHS_23TO30,
+    TAF_2         = END_INDEX_2 / PRICE_INDEX_2,
+    TASP_2        = SALEPRICE * TAF_2,
+    TASPPSF_2     = TASP_2 / SRESB_FLOORAREA,
+    LN_TASP       = log(TASP_2)
+  )
+```
+
+```{r mod2a}
+############################################################
+# 18. Diagnostics & ggplot charts for LN_SPPSF model
+############################################################
+
+# 1) Get the rows that were actually used by the model
+mf <- model.frame(mod_ln_price_back)          # model frame
+row_idx <- as.integer(rownames(mf))           # row numbers in df
+
+# 2) Subset df to those rows and augment
+aug_sppsf <- augment(mod_ln_price_back, data = df[row_idx, ]) %>%
+  mutate(
+    # back-transform from log if LN_SPPSF = log(SPPSF)
+    PRED_SPPSF = exp(.fitted),
+    STD_RESID  = .std.resid
+  )
+
+# 3) Histogram of standardized residuals + normal curve
+stats_resid <- aug_sppsf %>%
+  summarise(
+    MEAN = mean(STD_RESID, na.rm = TRUE),
+    SD   = sd(STD_RESID,   na.rm = TRUE),
+    N    = sum(!is.na(STD_RESID))
+  )
+
+mu <- stats_resid$MEAN
+sd_ <- stats_resid$SD
+n_  <- stats_resid$N
+binwidth <- 0.25
+
+ggplot(aug_sppsf, aes(x = STD_RESID)) +
+  geom_histogram(binwidth = binwidth, color = "black", fill = "steelblue") +
+  stat_function(
+    fun = function(x) dnorm(x, mean = mu, sd = sd_) * n_ * binwidth,
+    size = 1
+  ) +
+  labs(
+    title = "Histogram\nDependent Variable: LN_PRICE",
+    x = "Regression Standardized Residual",
+    y = "Frequency"
+  ) +
+  annotate(
+    "text",
+    x = Inf, y = Inf,
+    hjust = 1.1, vjust = 1.5,
+    label = sprintf("Mean = %.3f\nStd. Dev. = %.3f\nN = %d", mu, sd_, n_)
+  ) +
+  theme_minimal()
+```
+
+```{r mod2p}
+# 4) Residuals vs MONTHS
+ggplot(aug_sppsf, aes(x = MONTHS, y = STD_RESID)) +
+  geom_point(alpha = 0.5, size = 1.2) +
+  geom_smooth(method = "loess", se = FALSE, color = "red") +
+  geom_vline(xintercept = c(10, 20), linetype = "dashed") +
+  labs(x = "MONTHS", y = "Standardized residual") +
+  theme_minimal()
+```
+
+```{r mod3}
+# ---- 25. LN_TASP model with clusters, backward elimination ----
+
+mod_ln_tasp_full <- lm(
+  LN_TASP ~ LN_LANDRATIO + LN_BASE_BLDGSIZE_RATIO +
+    ARTERIAL +
+    SINGLE_FAMILY1STORY +
+    HALF_DUPLEX1STORY + HALF_DUPLEX2STORY +
+    SMALLEST + SMALL + LARGE + LARGEST +
+    TWO_PLUS_BATHS + POWDER_ROOM +
+    GOOD + FAIR + POOR + VERY_POOR_UNSOUND +
+    QABOVE_AVG + QBELOW_AVG_POOR +
+    YB_PRE_1929 + YB_1946_TO_1960 + YB_POST_1961 +
+    CRAWL + SLAB +
+    LN_GARAGESPACES + FIREPLACE +
+    HOT_WATER + CENTRAL_AIR +
+    CLUSTER_ID,
+  data = df_in
+)
+
+mod_ln_tasp_back <- stats::step(
+  mod_ln_tasp_full,
+  direction = "backward",
+  trace = FALSE
+)
+```
+
+```{r mod3a}
+############################################################
+# 18. Diagnostics & ggplot charts for LN_SPPSF model
+############################################################
+
+# 1) Get the rows that were actually used by the model
+mf <- model.frame(mod_ln_tasp_back)          # model frame
+row_idx <- as.integer(rownames(mf))           # row numbers in df
+
+# 2) Subset df to those rows and augment
+aug_sppsf <- augment(mod_ln_tasp_back, data = df[row_idx, ]) %>%
+  mutate(
+    # back-transform from log if LN_SPPSF = log(SPPSF)
+    PRED_SPPSF = exp(.fitted),
+    STD_RESID  = .std.resid
+  )
+
+# 3) Histogram of standardized residuals + normal curve
+stats_resid <- aug_sppsf %>%
+  summarise(
+    MEAN = mean(STD_RESID, na.rm = TRUE),
+    SD   = sd(STD_RESID,   na.rm = TRUE),
+    N    = sum(!is.na(STD_RESID))
+  )
+
+mu <- stats_resid$MEAN
+sd_ <- stats_resid$SD
+n_  <- stats_resid$N
+binwidth <- 0.25
+
+ggplot(aug_sppsf, aes(x = STD_RESID)) +
+  geom_histogram(binwidth = binwidth, color = "black", fill = "steelblue") +
+  stat_function(
+    fun = function(x) dnorm(x, mean = mu, sd = sd_) * n_ * binwidth,
+    size = 1
+  ) +
+  labs(
+    title = "Histogram\nDependent Variable: LN_TASP",
+    x = "Regression Standardized Residual",
+    y = "Frequency"
+  ) +
+  annotate(
+    "text",
+    x = Inf, y = Inf,
+    hjust = 1.1, vjust = 1.5,
+    label = sprintf("Mean = %.3f\nStd. Dev. = %.3f\nN = %d", mu, sd_, n_)
+  ) +
+  theme_minimal()
+```
+
+```{r mod3p}
+# 4) Residuals vs MONTHS
+ggplot(aug_sppsf, aes(x = MONTHS, y = STD_RESID)) +
+  geom_point(alpha = 0.5, size = 1.2) +
+  geom_smooth(method = "loess", se = FALSE, color = "red") +
+  geom_vline(xintercept = c(10, 20), linetype = "dashed") +
+  labs(x = "MONTHS", y = "Standardized residual") +
+  theme_minimal()
+```
+
+```{r tstats}
+# Predictions & ratio vs TASP_2 (ESP3 analog)
+df_in <- df_in %>%
+  mutate(
+    PRE_3 = predict(mod_ln_tasp_back, newdata = df_in),
+    ESP3  = exp(PRE_3),
+    RATIO3 = ESP3 / TASP_2
+  )
+
+# Ratio stats for ESP3 vs TASP_2 by selected groups
+if ("ECF" %in% names(df_in)) {
+  ratio_by_ecf <- ratio_stats_by(df_in, ECF, TASP_2, ESP3)
+  print(ratio_by_ecf)
+}
+
+ratio_by_SCOND <- ratio_stats_by(df_in, SCOND, TASP_2, ESP3)
+ratio_by_SIZE  <- ratio_stats_by(df_in, SIZE,  TASP_2, ESP3)
+
+print(ratio_by_SCOND)
+print(ratio_by_SIZE)
+
+# Within 10/20/50% for ESP3
+within3 <- within_band_flags(df_in$ESP3, df_in$TASP_2)
+
+within3_summary <- within3 %>%
+  summarise(
+    PCT_WITHIN10 = mean(WITHIN10) * 100,
+    PCT_WITHIN20 = mean(WITHIN20) * 100,
+    PCT_WITHIN50 = mean(WITHIN50) * 100
+  )
+
+print(within3_summary)
+```
+
+```{r mod4}
+# ---- 26. Alternative size: LNSBLDSFINT & final dollar model (MODMV) ----
+
+mod_ln_tasp_alt <- lm(
+  LN_TASP ~ LN_LANDRATIO + LNSBLDSFINT +
+    ARTERIAL +
+    SINGLE_FAMILY1STORY +
+    HALF_DUPLEX1STORY + HALF_DUPLEX2STORY +
+    SMALLEST + SMALL + LARGE + LARGEST +
+    TWO_PLUS_BATHS + POWDER_ROOM +
+    GOOD + FAIR + POOR + VERY_POOR_UNSOUND +
+    QABOVE_AVG + QBELOW_AVG_POOR +
+    YB_PRE_1929 + YB_1946_TO_1960 + YB_POST_1961 +
+    CRAWL + SLAB +
+    GARAGESPACES + FIREPLACE +       # garage as count
+    HOT_WATER + CENTRAL_AIR +
+    CLUSTER_ID,
+  data = df_in
+)
+
+mod_ln_tasp_alt_back <- stats::step(
+  mod_ln_tasp_alt,
+  direction = "backward",
+  trace = FALSE
+)
+
+summary(mod_ln_tasp_alt_back)
+
+df_in <- df_in %>%
+  mutate(
+    PRE_4 = predict(mod_ln_tasp_alt_back, newdata = df_in),
+    ESP4  = exp(PRE_4),
+    MODMV = ESP4,              # final dollar modeled value
+    RATIO4 = ESP4 / TASP_2
+  )
+
+# Ratio stats & within-bands for ESP4 vs TASP_2
+ratio_by_SRESB_STYLE_4 <- ratio_stats_by(df_in, SRESB_STYLE, TASP_2, ESP4)
+print(ratio_by_SRESB_STYLE_4)
+
+within4 <- within_band_flags(df_in$ESP4, df_in$TASP_2)
+within4_summary <- within4 %>%
+  summarise(
+    PCT_WITHIN10 = mean(WITHIN10) * 100,
+    PCT_WITHIN20 = mean(WITHIN20) * 100,
+    PCT_WITHIN50 = mean(WITHIN50) * 100
+  )
+print(within4_summary)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r tadd, eval = FALSE}
+# Which rows in df do the df_in rows correspond to?
+id_in <- as.integer(rownames(df_in))
+
+# Columns you want to copy back
+cols_time <- c("PRICE_INDEX_2", "TAF_2", "TASP_2", "TASPPSF_2", "LN_TASP")
+
+# Make sure df has these columns (they’ll be created if they don’t exist yet)
+for (nm in cols_time) {
+  if (!nm %in% names(df)) {
+    df[[nm]] <- NA_real_
+  }
+}
+
+# Copy values from df_in back into df for those rows
+df[id_in, cols_time] <- df_in[, cols_time]
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

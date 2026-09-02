@@ -1,0 +1,294 @@
+---
+title: "Residential Sales - Exploratory Data Analysis"
+author: |
+  | Elliot Dean - Program Analyst IV  
+  | Office of the Chief Financial Officer | Office of the Assessor
+  | City of Detroit
+date: "`r sub('^0', '', format(Sys.Date(), '%d %B %Y'))`"
+geometry: margin = 1.5cm
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  warning = FALSE,
+  message = FALSE,
+  error   = FALSE
+)
+```
+
+---
+
+## Introduction
+
+This report will highlight the impact of the physical condition classification rating on the
+accuracy of linear regression models to predict sales price.
+The files northeastCustomSales.csv and Dan_NorthEast_Sales1.csv were used for the sales data
+compared in this analysis. The custom sales file contains updated condition classifications
+for properties, the other csv contains older classification ratings.
+The dataframes and models loaded here for analysis were produced by their respective R Markdown
+documents (NE_Custom_Sales.Rmd, NE_Sales_Dan.Rmd).
+
+## Load Necessary Libraries
+
+```{r lib_load}
+library(tidyverse)   # data wrangling & ggplot2
+library(janitor)     # functions for examining and cleaning dirty data
+library(lmtest)      # Breusch–Pagan test
+library(here)        # Find files within a project
+library(car)         # vif()
+library(ggpubr)      # Automatically print the regression equation for ggplot
+library(ggrepel)     # provides geoms for ggplot2 to repel overlapping text labels
+library(ggpmisc)     # Miscellaneous Extensions to 'ggplot2'
+library(ggpp)        # Grammar Extensions to 'ggplot2'
+library(spgwr)       # Functions for computing geographically weighted regressions
+library(tidymodels)  # collection of packages for modeling and machine learning
+library(bundle)      # Serialize Model Objects with a Consistent Interface
+library(psych)       # group statistics, including correlations and factor analysis
+library(kableExtra)  # make attractive tables
+library(broom)       # Convert Statistical Objects into Tidy tables
+library(scales)      # provides the internal scaling infrastructure used by ggplot2
+library(olsrr)       # package for p-value backward elimination
+library(MASS)        # Functions & datasets for Venables & Ripley
+library(rlang)       # Functions for Base Types and Core R and 'Tidyverse' Features
+library(gt)          # Easily create presentation-ready display tables
+library(gtsummary)   # create publication-ready analytical and summary tables
+library(skimr)       # Compact and Flexible Summaries of Data
+```
+
+### Create Custom Functions (Code in Appendix)
+
+```{r load-funs, include = FALSE, ref.label = "functions"}
+```
+
+## Importing and Organizing Data / Regression Models
+
+```{r data_import}
+load(here("data/northeast", "ne_dan_custom_sales_dfs.RData"))
+
+A <- ne_custom_df
+B <- ne_dan_df
+
+clns <- readRDS(here("models", "necs_model_1.rds"))
+clnp <- readRDS(here("models", "necs_model_2.rds"))
+dlns <- readRDS(here("models", "nedan_model_1.rds"))
+dlnp <- readRDS(here("models", "nedan_model_2.rds"))
+```
+
+---
+
+## Compare Condition Ratings
+
+```{r rating_comparison}
+want <- c('SALEID', 'SALEDATE', 'SALEPRICE', 'SCOND')
+small_A <- A |> select(all_of(want))   # error if any are absent
+small_B <- B |> select(any_of(want))   # silently drops absent cols
+
+x1 <- small_A |>
+  arrange(SALEID, desc(SALEDATE)) |>        # choose your rule
+  distinct(SALEID, .keep_all = TRUE)
+
+y1 <- small_B |> arrange(SALEID, desc(SALEDATE)) |> distinct(SALEID, .keep_all = TRUE)
+
+joined <- x1 |> full_join(y1, by = "SALEID")
+ckeep <- c('SALEDATE', 'SALEPRICE', 'CUSTOM_CONDITION', 'DAN_CONDITION')
+
+condComp <- joined |> 
+  mutate(
+    SALEDATE         = SALEDATE.x,
+    SALEPRICE        = SALEPRICE.x,
+    CUSTOM_CONDITION = SCOND.x,
+    DAN_CONDITION    = SCOND.y
+  )
+conds <- condComp[ckeep]
+gt_highlight_diffs(conds, CUSTOM_CONDITION, DAN_CONDITION,
+                   title = "Example Condition Values from Each Sales Dataset")
+```
+
+---
+
+## Compare Predictor Significance Values
+
+```{r plotp}
+plot_lm_pvalues_three(clns, dlns,
+  labels = c("Custom","Dan"),
+  title = "Predictor p-values by Model, SPPSF",
+  label_style = "scientific",
+  digits = 2,
+  format_axis_scientific = TRUE
+)
+
+plot_lm_pvalues_three(clnp, dlnp,
+  labels = c("Custom","Dan"),
+  title = "Predictor p-values by Model, LN_PRICE",
+  label_style = "scientific",
+  digits = 2,
+  format_axis_scientific = TRUE
+)
+```
+
+---
+
+## Compare Model Metrics
+
+```{r modmetrics}
+modmetrics(clns, "Custom Model (SPPSF) Metrics")
+modmetrics(dlns, "Dan Model (SPPSF) Metrics")
+modmetrics(clnp, "Custom Model (LN_PRICE) Metrics")
+modmetrics(dlnp, "Dan Model (LN_PRICE) Metrics")
+```
+
+## Conclusion
+
+While a perfect side-by-side comparison between the 2 models is not possible due to the
+backward regression process eliminating insignificant predictors
+(along with different time variables), the striking variation in adjusted R squared values and
+degree of significance of predictors clearly shows the importance of accurately characterizing
+the condition of a property. The most powerful predictors of property value were the 
+condition variables. This is clearly demonstrated by both models, but the Custom condition
+adjustments greatly improve the significance of certain condition factors compared to the
+original values.
+
+Acknowledging that property condition is subjectively assessed, it is clear that changing how
+those determinations are made can impact model accuracy enormously. 
+
+## Custom Functions
+
+```{r functions, eval = FALSE}
+gt_highlight_diffs <- function(data, col_a, col_b, n = 10, highlight = "#fff3bf",
+                               title = "Difference Table") {        # "#ffe6e6"                     
+  ca <- ensym(col_a); cb <- ensym(col_b)
+  d <- data |>
+    slice_head(n = n) |>
+    mutate(
+      .diff_row =
+        (is.na(!!ca) != is.na(!!cb)) |                              # one NA, one not
+        (!is.na(!!ca) & !is.na(!!cb) & (!!ca != !!cb))              # both present, not equal
+    )
+  gt_tbl <- d |> gt() |>
+    tab_style(    # highlight col_a cells where the row differs
+      style = list(cell_fill(color = highlight), cell_text(weight = "bold")),
+      locations = cells_body(columns = !!ca, rows = .diff_row)
+    ) |>
+    tab_style(    # highlight col_b cells where the row differs
+      style = list(cell_fill(color = highlight), cell_text(weight = "bold")),
+      locations = cells_body(columns = !!cb, rows = .diff_row)
+    ) |> cols_hide(.diff_row) |> tab_header(title = title) |> cols_align(align = "center") |>
+    opt_table_outline() # |> opt_table_lines()
+  gt_tbl
+}
+
+plot_lm_pvalues_two <- function(mod1, mod2, labels = c("Model 1", "Model 2"),
+                                drop_intercept = TRUE, digits = 3, alpha_line = 0.05,
+                                show_labels = TRUE) {
+  acc <- 10^(-digits)
+  eps <- 1e-16
+  td1 <- broom::tidy(mod1) |> mutate(.model = labels[1])
+  td2 <- broom::tidy(mod2) |> mutate(.model = labels[2])
+  df <- bind_rows(td1, td2)
+
+  if (drop_intercept) df <- df |> filter(term != "(Intercept)")
+  df <- df |>    # clamp tiny p for log scale; build formatted label
+    mutate(p_clamp = pmax(p.value, eps), label_fmt = scales::number(p.value, accuracy = acc))
+  
+  order_df <- df |> # order terms by lowest p across models so rows are comparable
+    group_by(term) |>
+    summarise(p_min = min(p_clamp, na.rm = TRUE), .groups = "drop")
+
+  df <- df |> left_join(order_df, by = "term") |>
+    mutate(term_ord = forcats::fct_reorder(term, p_min, .desc = TRUE)) # least sig at top
+  
+  pd <- position_dodge(dodge_width)    # dodge so two model points don’t overlap
+  p <- ggplot(df, aes(x = p_clamp, y = term_ord, colour = .model)) +
+    geom_point(size = 3, position = pd) +
+    geom_vline(xintercept = alpha_line, linetype = "dashed", colour = "red") +
+    scale_x_log10(name = "P-Value (log scale)",
+                  expand = expansion(mult = c(0.02, sidebar_space_mult))) +
+    labs(title = "Predictor p-values by model", y = "Predictor", colour = "Model") + theme_minimal()
+
+  if (show_labels) {
+    if (requireNamespace("ggrepel", quietly = TRUE)) {
+      p <- p + ggrepel::geom_text_repel(
+        aes(label = label_fmt), size = 2.5, position = pd, max.overlaps = 200,
+        box.padding = 0.25, point.padding = 0.2, min.segment.length = 0
+      )
+    } else {
+      p <- p + geom_text(
+        aes(label = label_fmt), size = 2.5, vjust = -0.6, position = pd, check_overlap = TRUE
+      )
+    }
+  }
+  p
+}
+
+plot_lm_pvalues_three <- function(mod1, mod2, labels = c("Model 1", "Model 2"), title = "Model",
+                                     drop_intercept = TRUE, digits = 2, alpha_line = 0.05,
+                                     show_labels = TRUE, label_style = c("decimal","scientific"),
+                                     format_axis_scientific = TRUE, dodge_width = 1.5) {
+  label_style <- match.arg(label_style)
+  acc <- 10^(-digits)
+  eps <- 1e-16
+  td1 <- broom::tidy(mod1) |> mutate(.model = labels[1])
+  td2 <- broom::tidy(mod2) |> mutate(.model = labels[2])
+  df  <- bind_rows(td1, td2)
+
+  if (drop_intercept) df <- df |> filter(term != "(Intercept)")
+  lbl_fun <- if (label_style == "scientific") {    # choose a label formatter
+    scales::label_scientific(digits = digits, drop0trailing = TRUE)
+  } else {function(x) scales::number(x, accuracy = acc)}
+
+  df <- df |> mutate(p_clamp = pmax(p.value, eps), label_fmt = lbl_fun(p.value))
+  order_df <- df |>    # order rows by smallest p across models
+    group_by(term) |>
+    summarise(p_min = min(p_clamp, na.rm = TRUE), .groups = "drop")
+
+  df <- df |>
+    left_join(order_df, by = "term") |>
+    mutate(term_ord = forcats::fct_reorder(term, p_min, .desc = TRUE))
+
+  pd <- position_dodge(width = dodge_width)
+  p <- ggplot(df, aes(x = p_clamp, y = term_ord, colour = .model)) +
+    geom_point(size = 2.5, position = pd) +
+    geom_vline(xintercept = alpha_line, linetype = "dashed", colour = "red") +
+    scale_x_log10(
+      name = "P-Value (log scale)",
+      labels = if (format_axis_scientific) scales::label_scientific() else waiver()
+    ) + labs(title = title, y = "Predictor", colour = "Model") +
+    theme_minimal() + coord_cartesian(clip = "off")
+
+  if (show_labels) {
+    if (requireNamespace("ggrepel", quietly = TRUE)) {
+      p <- p + ggrepel::geom_text_repel(aes(label = label_fmt),
+        size = 3, position = pd, max.overlaps = 50,
+        box.padding = 0.5, point.padding = 0.5, min.segment.length = 0
+      )
+    } else {
+      p <- p + geom_text(
+        aes(label = label_fmt), size = 3, vjust = -0.8, position = pd, check_overlap = TRUE
+      )
+    }
+  }
+  p
+}
+
+modmetrics <- function(model, title) {
+  s1 <- summary(model)
+  mod_df <- 
+    data.frame(
+      n           = nobs(model),
+      p           = length(coef(model)), # number of parameters (incl. intercept)
+      R2          = s1$r.squared,
+      Adj_R2      = s1$adj.r.squared,
+      ResStandDev = s1$sigma,  # residual std. dev. (RMSE-ish, with d.f. correction)
+      ResDegFree  = model$df.residual,         # residual degrees of freedom
+      RMSE        = sqrt(mean(residuals(model)^2)),
+      MAE         = mean(abs(residuals(model))),
+      AIC         = AIC(model)
+  )
+  gt(mod_df) |> tab_header(title = title)
+}
+```
+

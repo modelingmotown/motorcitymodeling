@@ -1,0 +1,815 @@
+---
+title: 'SPSS_Modeling'
+author: 'Elliot Dean'
+date: '`r Sys.Date()`'
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  warning = FALSE,
+  message = FALSE,
+  error   = FALSE
+)
+```
+
+#### Code translation by chatGPT (o4-mini-high)
+
+##### Install Libraries
+
+```{r inst_libs, eval = FALSE}
+install.packages(c('tidyverse', 'caret', 'broom', 'car', 'lmtest', 'ggpubr', 'ggpmisc',
+                   'tidymodels', 'reticulate', 'DBI', 'odbc', 'sf', 'corrplot', 'httr',
+                   'spgwr', 'yardstick', 'xgboost', 'bundle', 'olsrr', 'MASS'))
+```
+
+##### Load Necessary Libraries
+
+```{r lib_load}
+library(tidyverse)   # data wrangling & ggplot2
+library(janitor)     # functions for examining and cleaning dirty data
+library(haven)       # to read SPSS .sav files
+library(caret)       # train/test split, cross‐validation
+library(broom)       # tidy model output
+library(car)         # VIF, Durbin‐Watson
+library(lmtest)      # Breusch–Pagan test
+library(ggpmisc)     # Automatically print the regression equation for ggplot
+library(ggpubr)
+library(spgwr)       # Functions for computing geographically weighted regressions
+library(tidymodels)  # collection of packages for modeling and machine learning
+library(yardstick)
+library(xgboost)
+library(bundle)
+# library(reticulate)
+```
+
+##### Importing and Organizing Data
+
+```{r data_import}
+df <- read_sav('data/ECF_NE-Area_Data.sav')
+# Convert to a plain data.frame or tibble if you prefer:
+df <- as_tibble(df) |> 
+  clean_names()
+```
+
+##### FREQUENCIES / CROSSTABS
+
+```{r freqs}
+# SPSS: FREQUENCIES CCD.
+table(df$ccd, useNA = 'ifany')
+
+# SPSS: FREQUENCIES ECF.
+table(df$ecf, useNA = 'ifany')
+
+# SPSS: * 3057 records  (We’ll trust the file has 3057 observations)
+# SPSS: FREQUENCIES SRESB_GROUNDAREA.
+# table(df$s_resb_groundarea, useNA = 'ifany')
+
+# SPSS: FREQUENCIES SRESB_FLOORAREA.
+# table(df$s_resb_floorarea, useNA = 'ifany')
+
+# SPSS: FREQUENCIES SRESB_BASEMENTTYPE.  *NOT USABLE (commented out)
+# SPSS: FREQUENCIES RD_CLASS.  *MANY INVALID VALUES (commented out)
+# SPSS: COMPUTE RATIO = SESTTCV / SALEPRICE; FREQUENCIES RATIO.
+df <- df |>
+  mutate(ratio = s_esttcv / saleprice)
+
+summary(df$ratio)
+
+# To get the “MEANS RATIO/CELLS MEAN MEDIAN MIN MAX”:
+df |> 
+  summarise(
+    COUNT  = sum(!is.na(ratio)),
+    MEAN   = mean(ratio, na.rm = TRUE),
+    MEDIAN = median(ratio, na.rm = TRUE),
+    MIN    = min(ratio, na.rm = TRUE),
+    MAX    = max(ratio, na.rm = TRUE),
+    RANGE  = diff(range(ratio, na.rm = TRUE))
+  )
+```
+
+##### CREATE “OUT” FLAG AND FILTER BAD RECORDS
+
+```{r out_flag_filter}
+# SPSS sets OUT = 0, then flips to 1 for implausible lots/buildings/prices.
+df <- df |> 
+  mutate(out = 0)
+
+# *FILTER OUT LOTS THAT ARE TOO SMALL.*
+df <- df |> 
+  mutate(out = if_else(s_totalsqft < 400, 1L, out))
+
+# *FILTER OUT BUILDINGS THAT ARE TOO SMALL OR TOO LARGE.*
+df <- df |> 
+  mutate(out = if_else(s_resb_floorarea < 400, 1L, out))
+
+# *FILTER OUT PRICES THAT ARE TOO LOW.*
+df <- df |> 
+  mutate(out = if_else(saleprice < 10000, 1L, out))
+
+# (*Other filters commented out in SPSS: isVacantLandSale, LANDBANKSALES, PRICEISASMT_RATIO*)
+
+# Check frequency of OUT
+df |>
+  count(out)
+
+# SPSS: *Removes 19 records.*  
+# Apply SELECT IF OUT=0  →  keep only OUT == 0
+df <- df |>
+  filter(out == 0)
+```
+
+##### COMPUTE PERCENTAGES FOR CRAWL/SLAB/BASEMENT & BINARY FLAGS
+
+```{r percent_csb}
+# SPSS:
+#   COMPUTE PCTCRAWL = (SRESB_CRAWSPACE / SRESB_GROUNDAREA).
+#   COMPUTE PCTSLAB   = (SRESB_SLABAREA   / SRESB_GROUNDAREA).
+#   COMPUTE PCTBSMNT  = (SRESB_BASEMENTAREA / SRESB_GROUNDAREA).
+df <- df |> 
+  mutate(
+    pctcrawl  = s_resb_crawspace / s_resb_groundarea,
+    pctslab   = s_resb_slabarea   / s_resb_groundarea,
+    pctbsmnt  = s_resb_basementarea / s_resb_groundarea
+  )
+
+# SPSS (commented out earliest version). Then actual code:
+#   COMPUTE CRAWL = 0.
+#   IF (PCTCRAWL GT PCTBSMNT) AND (PCTCRAWL GT PCTSLAB) CRAWL = 1.
+#   COMPUTE SLAB = 0.
+#   IF (PCTSLAB GT PCTCRAWL) AND (PCTSLAB GT PCTBSMNT) SLAB = 1.
+df <- df |> 
+  mutate(
+    crawl = if_else(pctcrawl  > pctbsmnt & pctcrawl  > pctslab, 1L, 0L),
+    slab  = if_else(pctslab   > pctcrawl & pctslab   > pctbsmnt, 1L, 0L)
+  )
+```
+
+##### RECODE SRESB_STYLE INTO BINARY INDICATORS + BUILDING SIZE RATIOS
+
+```{r recode_style}
+# SPSS:
+#   RECODE SRESB_STYLE('1/2 DUPLEX' = 1)(ELSE = 0) INTO BSZ_HALFDUPLEX.
+df <- df |> 
+  mutate(bsz_halfduplex = if_else(s_resb_style == '1/2 DUPLEX', 1L, 0L))
+
+#   *MEANS SRESB_FLOORAREA BY BSZ_HALFDUPLEX / CELLS=COUNT MEDIAN MEAN MIN MAX.*
+df |> 
+  group_by(bsz_halfduplex) |> 
+  summarise(
+    COUNT  = n(),
+    MEDIAN = median(s_resb_floorarea, na.rm = TRUE),
+    MEAN   = mean(s_resb_floorarea, na.rm = TRUE),
+    MIN    = min(s_resb_floorarea, na.rm = TRUE),
+    MAX    = max(s_resb_floorarea, na.rm = TRUE)
+  )
+
+#   RECODE SRESB_STYLE('ROW HOUSE' = 1)(ELSE = 0) INTO BSZ_ROW.
+# df <- df |> 
+  # mutate(BSZ_ROW = if_else(SRESB_STYLE == 'ROW HOUSE', 1L, 0L))
+
+#   *MEANS SRESB_FLOORAREA BY BSZ_ROW / CELLS=COUNT MEDIAN MEAN MIN MAX.*
+#   *No Row houses (so median is n/a).*
+# df |> 
+  #group_by(BSZ_ROW) %>%
+  #summarise(
+    #COUNT  = n(),
+    #MEDIAN = median(SRESB_FLOORAREA, na.rm = TRUE),
+    #MEAN   = mean(SRESB_FLOORAREA, na.rm = TRUE),
+    #MIN    = min(SRESB_FLOORAREA, na.rm = TRUE),
+    #MAX    = max(SRESB_FLOORAREA, na.rm = TRUE)
+  #)
+
+# --------------------------------------------------
+# UPDATE RECODE USING MEDIANS BY STYLE (SPSS)
+# --------------------------------------------------
+#   RECODE SRESB_STYLE ('SINGLE FAMILY' = 1056)('1/2 DUPLEX' = 840) INTO BASE_BLDGSIZE.
+#   COMPUTE BASE_BLDGSIZE_RATIO = SRESB_FLOORAREA / BASE_BLDGSIZE.
+#   MEANS BASE_BLDGSIZE_RATIO BY SRESB_STYLE / CELLS=COUNT MEDIAN MEAN MIN MAX.
+#   COMPUTE LN_BASE_BLDGSIZE_RATIO = LN(BASE_BLDGSIZE_RATIO).
+df <- df |> 
+  mutate(
+    base_bldgsize = case_when(
+      s_resb_style == 'SINGLE FAMILY' ~ 1056,
+      s_resb_style == '1/2 DUPLEX'    ~  840,
+      TRUE                            ~  NA_real_
+    ),
+    base_bldgsize_ratio     = s_resb_floorarea / base_bldgsize,
+    ln_base_bldgsize_ratio  = log(base_bldgsize_ratio)
+  )
+
+# SPSS summary:
+df |> 
+  group_by(s_resb_style) |> 
+  summarise(
+    COUNT  = n(),
+    MEDIAN = median(base_bldgsize_ratio, na.rm = TRUE),
+    MEAN   = mean(base_bldgsize_ratio, na.rm = TRUE),
+    MIN    = min(base_bldgsize_ratio, na.rm = TRUE),
+    MAX    = max(base_bldgsize_ratio, na.rm = TRUE)
+  )
+```
+
+##### CREATE ERABUILT CATEGORIES
+
+```{r era_cat}
+# SPSS:
+#   COMPUTE ERABUILT = 0.
+#   IF (SRESB_YEARBUILT < 1910) ERABUILT = 1.
+#   IF (SRESB_YEARBUILT ≥ 1910 AND SRESB_YEARBUILT < 1930) ERABUILT = 2.
+#   IF (SRESB_YEARBUILT ≥ 1930 AND SRESB_YEARBUILT < 1946) ERABUILT = 3.
+#   IF (SRESB_YEARBUILT ≥ 1946 AND SRESB_YEARBUILT < 1961) ERABUILT = 4.
+#   IF (SRESB_YEARBUILT ≥ 1961 AND SRESB_YEARBUILT ≤ 1990) ERABUILT = 5.
+#   IF (SRESB_YEARBUILT > 1990) ERABUILT = 6.
+
+df <- df |> 
+  mutate(
+    erabuilt = case_when(
+      s_resb_yearbuilt < 1910                     ~ 1L,
+      s_resb_yearbuilt >= 1910 & s_resb_yearbuilt < 1930  ~ 2L,
+      s_resb_yearbuilt >= 1930 & s_resb_yearbuilt < 1946  ~ 3L,
+      s_resb_yearbuilt >= 1946 & s_resb_yearbuilt < 1961  ~ 4L,
+      s_resb_yearbuilt >= 1961 & s_resb_yearbuilt <= 1990 ~ 5L,
+      s_resb_yearbuilt > 1990                     ~ 6L,
+      TRUE                                        ~ NA_integer_
+    )
+  )
+
+# SPSS: FREQUENCIES ERABUILT.
+table(df$erabuilt, useNA = 'ifany')
+
+# (SPSS value labels are not strictly necessary in R unless you want factors)
+# -- “1 = Pre 1910”; “2 = 1911–1929”; “3 = 1930–1945”; “4 = 1946–1960”;
+#    “5 = 1961–1990”; “6 = Post 1990”.
+
+# SPSS: CROSSTABS ERABUILT BY SCOND.  (We can do cross‐tabulation)
+table(df$erabuilt, df$s_cond, useNA = 'ifany')
+
+# SPSS: MEANS SPPSF BY SCOND / CELLS=COUNT MEDIAN MEAN MIN MAX.
+df |> 
+  group_by(s_cond) |> 
+  summarise(
+    COUNT  = sum(!is.na(sppsf)),
+    MEDIAN = median(sppsf, na.rm = TRUE),
+    MEAN   = mean(sppsf, na.rm = TRUE),
+    MIN    = min(sppsf, na.rm = TRUE),
+    MAX    = max(sppsf, na.rm = TRUE)
+  )
+```
+
+##### RECODE STRUCTURE CONDITION (SCOND) INTO BINARY DUMMIES
+
+```{r recode_cond}
+# SPSS comments:
+#   *CREATE BINARY VARIABLES FOR SCOND. SCOND 3 IS BASE. MISSING TREATED AS BASE.
+#   *NO EXCELLENT OR VERY GOOD.
+#   RECODE SCOND (2=1)(ELSE=0) INTO GOOD.
+#   RECODE SCOND (4=1)(ELSE=0) INTO FAIR.
+#   RECODE SCOND (5=1)(ELSE=0) INTO POOR.
+#   RECODE SCOND (6 7=1)(ELSE=0) INTO VERY_POOR_UNSOUND.
+
+df <- df |> 
+  mutate(
+    good              = if_else(s_cond == 2, 1L, 0L),
+    fair              = if_else(s_cond == 4, 1L, 0L),
+    poor              = if_else(s_cond == 5, 1L, 0L),
+    very_poor_unsound = if_else(s_cond %in% c(6, 7), 1L, 0L)
+  )
+
+# SPSS: FREQUENCIES GOOD TO VERY_POOR_UNSOUND.
+df |>  
+  summarise(
+    n_GOOD              = sum(good, na.rm = TRUE),
+    n_FAIR              = sum(fair, na.rm = TRUE),
+    n_POOR              = sum(poor, na.rm = TRUE),
+    n_VERY_POOR_UNSOUND = sum(very_poor_unsound, na.rm = TRUE)
+  )
+```
+
+##### RECODE BUILDING CLASS (SRESB_BLDGCLASS) INTO DUMMIES
+
+```{r recode_class}
+# SPSS:
+#   VALUE LABELS SRESB_BLDGCLASS
+#     5 '5: A'; 4 '4: B'; 3 '3: BC'; 2 '2: C'; 1 '1: CD'; 0 '0: D'.
+#   FREQ SRESB_BLDGCLASS.
+#   * 2 (C) IS BASE.
+#   RECODE SRESB_BLDGCLASS (3 4 5=1)(ELSE=0) INTO QABOVE_AVG.
+#   RECODE SRESB_BLDGCLASS (0 1=1)(ELSE=0) INTO QBELOW_AVG.
+
+df <- df |> 
+  mutate(
+    qabove_avg = if_else(s_resb_bldgclass %in% c(3, 4, 5), 1L, 0L),
+    qbelow_avg = if_else(s_resb_bldgclass %in% c(0, 1), 1L, 0L)
+    # (SCODE 2 = “C” is the reference group)
+  )
+
+# SPSS: FREQUENCIES QABOVE_AVG, QBELOW_AVG.
+df |> 
+  summarise(
+    n_qabove_ave = sum(qabove_avg, na.rm = TRUE),
+    n_below_ave  = sum(qbelow_avg, na.rm = TRUE)
+  )
+```
+
+##### BATHROOMS: RECODE FULL AND HALF BATHS
+
+```{r recode_baths}
+# SPSS:
+#   FREQUENCIES Sresb_fullbaths.
+#   FREQUENCIES Sresb_halfbaths.
+#   RECODE Sresb_fullbaths (2 3 4 5 6 7 8 9 10 = 1) (ELSE = 0) INTO TWO_PLUS_BATHS.
+#   RECODE Sresb_halfbaths (1 2 3 4 5 = 1) (ELSE = 0) INTO POWDER_ROOM.
+
+df <- df |> 
+  mutate(
+    two_plus_baths = if_else(s_resb_fullbaths %in% 2:10, 1L, 0L),
+    powder_room    = if_else(s_resb_halfbaths %in% 1:5, 1L, 0L)
+  )
+
+# SPSS: FREQUENCIES TWO_PLUS_BATHS TO POWDER_ROOM.
+df |> 
+  summarise(
+    n_two_plus_baths = sum(two_plus_baths, na.rm = TRUE),
+    n_powder_room    = sum(powder_room, na.rm = TRUE)
+  )
+
+# (Note: SPSS’s “ONE_BATH” and “TWO_BATHS” recodes were commented out.)
+```
+
+##### BEDROOMS
+
+```{r, eval = FALSE}
+
+```
+
+##### OTHER BINARY INDICATORS (e.g., FIREPLACE, GARAGE, PORCH, etc.)
+
+```{r recode_bins}
+# Search for “COMPUTE <var> = 0” or recode patterns in SPSS. For brevity,
+# we will outline the pattern. For each SPSS “RECODE var (code = 1)(ELSE = 0) INTO newvar”:
+#   df <- df %>% mutate(newvar = if_else(var == 'code', 1L, 0L))
+#
+# Example (from later in SPSS syntax):
+#   RECODE ERABUILT (1=1)(ELSE=0) INTO YB_PRE_1910.
+df <- df |> 
+  mutate(
+    yb_pre_1910      = if_else(erabuilt == 1, 1L, 0L),
+    yb_pre_1929      = if_else(erabuilt %in% c(1, 2), 1L, 0L),
+    yb_1946_to_1960  = if_else(erabuilt == 4, 1L, 0L),
+    yb_post_1961     = if_else(erabuilt %in% c(5, 6), 1L, 0L)
+    # *(Note: SPSS had commented‐out versions for other eras)*
+  )
+
+# SPSS: FREQUENCIES YB_PRE_1910 TO YB_POST_1961.
+df |> 
+  summarise(
+    n_yb_yb_1910   = sum(yb_pre_1910, na.rm = TRUE),
+    n_yb_pre_1929  = sum(yb_pre_1929, na.rm = TRUE),
+    n_yb_1946_1960 = sum(yb_1946_to_1960, na.rm = TRUE),
+    n_yb_post_1961 = sum(yb_post_1961, na.rm = TRUE)
+  )
+```
+
+```{r notings}
+# 12) RECODE VARIABLE “SCOND” BINARYS (covered already in step 7)
+
+# 13) RECODE SRESB_BLDGCLASS (covered already in step 8)
+
+# 14) GARAGE, FIREPLACE, PORCH, etc.  (Search for more “RECODE” patterns)
+# Let's list all SPSS recodes to catch any additional variables:
+
+# (Scrolling through SPSS syntax revealed many more recodes under “ECF” variables beginning around line ~768)
+```
+
+##### RECODE “ECF” CATEGORIES INTO DUMMIES
+
+```{r recode_ecf}
+# SPSS:
+#   RECODE ECF('3R324'=1)(ELSE=0) INTO ECF3R324.
+#   RECODE ECF('3R325'=1)(ELSE=0) INTO ECF3R325.
+#   RECODE ECF('3R326'=1)(ELSE=0) INTO ECF3R326.
+#   RECODE ECF('2R211' '4R401'=1)(ELSE=0) INTO ECF4R401_211.
+#   RECODE ECF('4R402'=1)(ELSE=0) INTO ECF4R402.
+#   … etc. through ECF4R411.
+#   * RECODE ECF('5R539'=1)(ELSE=0) INTO ECF5R539.  (commented out)
+
+df <- df |> 
+  mutate(
+    ecf3R324      = if_else(ecf == '3R324', 1L, 0L),
+    ecf3R325      = if_else(ecf == '3R325', 1L, 0L),
+    ecf3R326      = if_else(ecf == '3R326', 1L, 0L),
+    ecf4R401_211  = if_else(ecf %in% c('2R211', '4R401'), 1L, 0L),
+    ecf4R402      = if_else(ecf == '4R402', 1L, 0L),
+    ecf4R403      = if_else(ecf == '4R403', 1L, 0L),
+    ecf4R404      = if_else(ecf == '4R404', 1L, 0L),
+    ecf4R405      = if_else(ecf == '4R405', 1L, 0L),
+    ecf4R406      = if_else(ecf == '4R406', 1L, 0L),
+    ecf4R407      = if_else(ecf == '4R407', 1L, 0L),
+    ecf4R408      = if_else(ecf == '4R408', 1L, 0L),
+    ecf4R409      = if_else(ecf == '4R409', 1L, 0L),
+    ecf4R410      = if_else(ecf == '4R410', 1L, 0L),
+    ecf4R411      = if_else(ecf == '4R411', 1L, 0L)
+    # (ecf5R539 was commented out in SPSS, so we omit it)
+  )
+
+# SPSS: FREQUENCIES ecf3R324 TO ecf4R411.
+df |> 
+  summarise(
+    n_ecf3R324     = sum(ecf3R324, na.rm = TRUE),
+    n_ecf3R325     = sum(ecf3R325, na.rm = TRUE),
+    n_ecf3R326     = sum(ecf3R326, na.rm = TRUE),
+    n_ecf4R401_211 = sum(ecf4R401_211, na.rm = TRUE),
+    n_ecf4R402     = sum(ecf4R402, na.rm = TRUE),
+    n_ecf4R403     = sum(ecf4R403, na.rm = TRUE),
+    n_ecf4R404     = sum(ecf4R404, na.rm = TRUE),
+    n_ecf4R405     = sum(ecf4R405, na.rm = TRUE),
+    n_ecf4R406     = sum(ecf4R406, na.rm = TRUE),
+    n_ecf4R407     = sum(ecf4R407, na.rm = TRUE),
+    n_ecf4R408     = sum(ecf4R408, na.rm = TRUE),
+    n_ecf4R409     = sum(ecf4R409, na.rm = TRUE),
+    n_ecf4R410     = sum(ecf4R410, na.rm = TRUE),
+    n_ecf4R411     = sum(ecf4R411, na.rm = TRUE)
+  )
+```
+
+```{r notings2}
+# 16) CONTINUED DATA EXCLUSION CHECKS (IF ANY)
+
+# SPSS:
+#   FILTER OFF.  (In R, once we filter out with dplyr::filter(), no need to re‐enable.)
+```
+
+##### CONVERT LOG PREDICTIONS TO DOLLARS
+
+```{r log_dollars}
+# SPSS:
+#   COMPUTE MODMV = EXP(PRE_4).
+df <- df |> 
+  mutate(modmv = exp(pre_4))
+```
+
+##### Drop duplicate columns + content
+
+```{r drop_dupe_cols}
+# Suppose df is your data.frame
+# 1) Transpose to get columns as rows
+mat <- t(as.matrix(df))
+
+# 2) Identify duplicated rows (i.e., duplicate columns in original)
+dups <- duplicated(mat)
+
+# 3) Keep only non-duplicates
+df_clean <- df[ , !dups]
+
+# Drop dupe column names
+# df <- df[ , !duplicated(names(df))]
+```
+
+#### Some visuals
+
+```{r vis_ggpubr}
+# esp1, esp2, esp3, esp4
+# ratio1, ratio2, ratio3, ratio4
+ggplot(df, aes(x = s_resb_floorarea, y = saleprice)) +
+  geom_point() +
+  stat_smooth(method = "lm", se = FALSE, color = "steelblue") +
+  stat_regline_equation(
+    aes(label =  paste(after_stat(eq.label), after_stat(adj.rr.label), sep = "~~~")),
+    label.x.npc = "left",   # use "npc" coordinates 0–1 in panel
+    label.y.npc = "top"
+  )
+```
+
+##### CREATE CHARTS OF TASP AND TASPPSF BY ECF FROM THE FINAL MODEL
+
+```{r chart_tasp, eval = FALSE}
+# SPSS:
+#   MEANS TASP BY ECF / CELLS=COUNT MEDIAN MEAN MIN MAX.
+#   MEANS TASPPSF BY ECF / CELLS=COUNT MEDIAN MEAN MIN MAX.
+
+df |> 
+  group_by(ecf, erabuilt) |> 
+  summarise(
+    n               = n(),
+    MEDIAN_tasp     = median(tasp, na.rm = TRUE),
+    MEAN_tasp       = mean(tasp, na.rm = TRUE),
+    MIN_tasp        = min(tasp, na.rm = TRUE),
+    MAX_tasp        = max(tasp, na.rm = TRUE)
+  )
+
+df |> 
+  group_by(ecf) |> 
+  summarise(
+    n              = n(),
+    MEDIAN_tasppsf = median(tasppsf, na.rm = TRUE),
+    MEAN_tasppsf   = mean(tasppsf, na.rm = TRUE),
+    MIN_tasppsf    = min(tasppsf, na.rm = TRUE),
+    MAX_tasppsf    = max(tasppsf, na.rm = TRUE)
+  )
+```
+
+```{r notings3}
+# 19) FINAL NOTES
+# ------------------------------------------------------------------------
+# At this point, all SPSS “COMPUTE” and “RECODE” statements have been translated to `mutate()` calls,
+# and all SPSS “FREQUENCIES” / “MEANS ... BY ...” have been translated to `table()` or `group_by() %>%
+# summarise()` calls.
+#
+# If you wish to save the resulting R data as an RDS, do:
+#   saveRDS(df, file = 'ECF_NE-Area_transformed.rds')
+#
+# If you need to export to CSV:
+#   write_csv(df, 'ECF_NE-Area_transformed.csv')
+#
+# You can also inspect any remaining variables or run further diagnostics as needed.
+
+# END OF R TRANSLATION
+```
+
+```{r drop_nas}
+df <- df |> 
+  drop_na()
+```
+
+#### Regression Models
+
+```{r reg_mod}
+# 23. Regression Models (SPSS: REGRESSION /DEPENDENT=LN_tasp /METHOD=BACKWARD ...)
+# The main regression model:
+# Note: Ensure all variables used in the model exist in your 'df_processed' data frame.
+# If some variables are not created due to previous comments in SPSS, you'll need to adjust.
+# Also, R's lm() doesn't directly support backward selection as an argument.
+# You'd typically use step() for stepwise selection after an initial model, or specify variables manually.
+
+# The second regression in the file (SPSS: REGRESSION /DEPENDENT=LN_tasp /METHOD=BACKWARD ...)
+# This model uses the time-adjusted sale price (LN_tasp).
+# lnsbldsfINT was part of the original SPSS REGRESSION
+
+lm_model_tasp <- lm(ln_tasp ~ ln_landratio + lnsbldsfint + arterial +
+                      single_family1story + half_duplex1story + half_duplex2story +
+                      smallest + small + large + largest + two_plus_baths + powder_room +
+                      good + fair + poor + very_poor_unsound + qabove_avg + qbelow_avg +
+                      yb_pre_1929 + yb_1946_to_1960 + yb_post_1961 + crawl + slab +
+                      ln_garagespaces + fireplace + hot_water + elec_baseboard + wall +
+                      central_air + months_1to9 + months_10to16 + months_17to24,
+                    data = df)
+summary(lm_model_tasp)
+
+# For backward selection in R, you would typically use `step()`:
+# # Define the formula for the full model
+# formula_full_tasp <- as.formula(
+#   "LN_tasp ~ LN_LANDRATIO + lnsbldsfINT + ARTERIAL +
+#   single_family1story + half_duplex1story + half_duplex2story +
+#   smallest + small + large + largest +
+#   two_plus_baths + powder_room +
+#   good + fair + poor + very_poor_unsound +
+#   qabove_avg + qbelow_avg +
+#   yb_pre_1929 + yb_1946_to_1960 + yb_post_1961 +
+#   CRAWL + SLAB + LN_GARAGESPACES + FIREPLACE +
+#   HOT_WATER + ELEC_BASEBOARD + WALL + CENTRAL_AIR +
+#   months_1to9 + months_10to16 + months_17to24"
+# )
+#
+# initial_lm_model_tasp <- lm(formula_full_tasp, data = df_processed)
+# backward_lm_model_tasp <- step(initial_lm_model_tasp, direction = "backward", trace = FALSE) # Set trace=TRUE to see steps
+# summary(backward_lm_model_tasp)
+
+# Final descriptive statistics (SPSS: DES saleprice tasp taf tasppsf.)
+# In R:
+# summary(df_processed$saleprice)
+# summary(df_processed$tasp)
+# summary(df_processed$taf)
+# summary(df_processed$tasppsf)
+```
+
+#### Clean Dataframe for machine learning input
+
+```{r recipe}
+rec <- recipe(saleprice ~ ., data = df_clean) |> 
+  # 1. Remove zero‐variance predictors
+  step_zv(all_predictors()) |> 
+  # 2. (Optional) other preprocessing steps, e.g. centering/scaling
+  step_center(all_predictors()) |> 
+  step_scale(all_predictors())
+
+```
+
+```{r recipe2}
+
+rec2 <- recipe(saleprice ~ ., data = df_clean) %>%
+  step_zv(all_predictors()) %>%               # drop zero‐variance
+  # center & scale *only* the numeric predictors
+  step_center(all_numeric_predictors()) %>%
+  step_scale(all_numeric_predictors())
+
+```
+
+
+
+```{r}
+rec2 %>% tidy(number = 1)
+
+prep_rec2 <- prep(rec2, training = df_clean)
+tidy(prep_rec2, number = 1)
+
+
+```
+
+
+
+```{r}
+data_split  <- initial_split(df_clean, prop = 0.8)
+train_data  <- training(data_split)
+test_data   <- testing(data_split)
+
+rec_prep3    <- prep(rec2, training = train_data)
+train_clean  <- bake(rec_prep3, new_data = train_data) # use to train, fit
+test_clean   <- bake(rec_prep3, new_data = test_data)
+
+
+```
+
+
+
+
+
+
+#### Train / Test Split
+
+```{r tt_split}
+set.seed(42)
+
+data_split <- initial_split(df4, prop = 0.8, strata = saleprice)
+train_data <- training(data_split)
+test_data  <- testing(data_split)
+```
+
+#### Preprocess
+
+```{r preprocess}
+house_rec <- recipe(saleprice ~ ., data = train_data) |> 
+  step_impute_median(all_numeric_predictors())        |> 
+  step_impute_mode(all_nominal_predictors())          |> 
+  step_dummy(all_nominal_predictors())                |> 
+  step_normalize(all_numeric_predictors())
+```
+
+#### Choice of Model
+
+```{r mod_typ}
+boost_spec <- boost_tree(
+    trees          = tune(),
+    learn_rate     = tune(),
+    tree_depth     = tune(),
+    loss_reduction = tune(),
+    min_n          = tune()
+  ) |> 
+  set_engine('xgboost') |> 
+  set_mode('regression')
+```
+
+##### Remove problematic columns
+
+```{r col_del}
+# df2 <- subset(df_clean, select = -s_propclass)
+df4 <- subset(df_clean,
+              select = -c(s_propclass, grantor, grantee, saledate, end_index,
+                          is_vacant_land_sale, primary_last, elec_baseboard, rate2, rate3,
+                          yb_pre_1910))
+
+# You can remove all columns between d and b with:
+# Data <- subset( Data, select = -c( d : b )
+
+# step_zv()
+```
+
+
+
+#### Training?
+
+```{r train_mod}
+library(workflows)
+wf <- workflow() %>%
+  add_recipe(rec) %>%
+  add_model(your_spec)
+
+# Fit on the training slice
+fit_wf <- fit(wf, data = train_data)
+
+# Predict on test slice
+predict(fit_wf, test_data)
+
+```
+
+
+
+#### Tune hyper‑parameters
+
+```{r tune_hp}
+set.seed(42)
+
+grid <- grid_latin_hypercube(
+  trees(), learn_rate(), tree_depth(),
+  loss_reduction(), min_n(),
+  size = 20
+)
+
+folds <- vfold_cv(train_data, v = 5)
+
+wf <- workflow() |> 
+  add_recipe(house_rec) |> 
+  add_model(boost_spec)
+
+tuned <- tune_grid(
+  wf, resamples = folds, grid = grid,
+  metrics = metric_set(rmse, rsq, mae),
+  control = control_grid(save_pred = TRUE)
+)
+
+best_params <- select_best(tuned, metric = 'rmse') # show_best(tuned, metric = "rmse")
+
+final_wf <- finalize_workflow(wf, best_params) |> 
+  fit(train_data)
+
+# show_notes(.Last.tune.result)
+```
+
+
+#### Evaluate Model
+
+```{r eval_mod}
+preds <- predict(final_wf, test_data) |> 
+  bind_cols(test_data)
+
+metrics <- preds |> 
+  metrics(truth = sale_price, estimate = .pred)
+
+metrics
+#>       .metric .estimator      .estimate
+#> 1        rmse      standard   18234.19
+#> 2         rsq      standard       0.82
+#> 3         mae      standard   13571.47
+```
+
+#### Save and Reuse
+
+```{r sav_mod}
+bundled <- bundle(final_wf) |>
+  axe_call()
+saveRDS(bundled, "detroit_house_price_model.rds")
+```
+
+#### Predict a new listing
+
+```{r mak_predict}
+new_house <- tibble(
+  bedrooms        = 3,
+  baths_tot       = 1.5,
+  finished_sq_ft  = 1200,
+  age             = 75,
+  stories         = 2,
+  bldg_cond       = "Average",
+  bldg_mat        = "Brick",
+  fireplace       = 1,
+  garage          = 1
+)
+
+model     <- readRDS("detroit_house_price_model.rds") |>
+  unbundle()
+
+predicted <- predict(model, new_house)
+
+scales::dollar(predicted$.pred)
+#> $148,000
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

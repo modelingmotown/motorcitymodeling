@@ -1,0 +1,414 @@
+---
+title: |
+  | City Districts 1 - 7 Linear Regression Analysis 
+  | Exploring Variable Impact on Sale Price | 2023 - 2025 Sales
+author: |
+  | Elliot Dean - Program Analyst IV  
+  | Office of the Chief Financial Officer | Office of the Assessor
+  | City of Detroit
+date: "`r sub('^0', '', format(Sys.Date(), '%d %B %Y'))`"
+geometry: margin = 1.5cm
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: false
+mainfont: Arial
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, error = FALSE, echo = FALSE)
+```
+
+```{r lib_load}
+library(tidyverse)   # data wrangling & ggplot2    Comparison: R / SPSS
+library(janitor)     # functions for examining and cleaning dirty data
+library(kableExtra)  # simple table generator
+library(here)        # Find files within a project
+library(olsrr)       # package for p-value backward elimination
+library(broom)       # summarizes key information about models
+library(rlang)       # functions for Base Types and Core R and 'Tidyverse' Features
+library(car)         # VIF, influence measures helpers
+library(scales)      # provides the internal scaling infrastructure used by ggplot
+```
+
+```{r fun, results='hide'}
+codf    <- readRDS(file = here("rmds/modfunctions", "codfunctions.rds"))
+codform <- readRDS(file = here("rmds", "codformulas.rds"))
+codf_env <- list2env(codf, parent = globalenv())
+for (nm in names(codf)) {environment(codf[[nm]]) <- codf_env}
+list2env(codf, envir = codf_env)
+source(here("rmds/cod2325/districtruns/d2325f", "spss_cod_district-1_23-25f.R"), local = knitr::knit_global())
+```
+
+```{r setup1}
+load(file = here("rmds/cod2325/districtruns/dmods", "spss_cod_district-1_23-25.RData"))
+load(file = here("rmds/cod2325/districtruns/dmods", "spss_cod_district-2_23-25.RData"))
+load(file = here("rmds/cod2325/districtruns/dmods", "spss_cod_district-3_23-25.RData"))
+load(file = here("rmds/cod2325/districtruns/dmods", "spss_cod_district-4_23-25.RData"))
+load(file = here("rmds/cod2325/districtruns/dmods", "spss_cod_district-5_23-25.RData"))
+load(file = here("rmds/cod2325/districtruns/dmods", "spss_cod_district-6_23-25.RData"))
+load(file = here("rmds/cod2325/districtruns/dmods", "spss_cod_district-7_23-25.RData"))
+```
+
+---
+
+## Results Summary
+
+The standardized beta metric is a unitless measure of the relationship between an independent
+and dependent variable based on standard deviation (SD). The value of beta indicates that for every
+increase in standard deviation of a predictor, the target will change by the equivalent amount.
+
+The average values obtained by the backward linear regression runs in R suggest that the following
+predictors have a higher likelihood of impacting sale price:
+
+- Sale month (predominantly first half of the year)    | - Size
+- Age                                                  | - Condition / Quality
+- Exterior Siding Type                                 | - Restrooms
+- Central Air Conditioning
+
+In addition, a number of Economic Condition Factors were significantly correlated with sale price.
+As these were District specific, they are reported after the shared predictors.\
+* All figures represent models trained using ECFs (formulas 3 -> 6)
+
+---
+
+## Results Excluding Economic Condition Factors
+
+```{r pplot1}
+res_beta <- codf$plot_avg_beta_lollipop_7models(
+  d1_mod_time_23_25_May12, d2_mod_time_23_25_May12, d3_mod_time_23_25_May12,
+  d4_mod_time_23_25_May12, d5_mod_time_23_25_May12, d6_mod_time_23_25_May12,
+  d7_mod_time_23_25_May12,
+  model_names = c("D1", "D2", "D3", "D4", "D5", "D6", "D7"),
+  top_n = 10,
+  title = "LN_SPPSF Models - Standardized Beta Values"
+)
+
+res_beta$plot
+```
+
+```{r btab1}
+res_extreme <- codf$summarize_extreme_betas_kable(
+  models = list(d1_mod_time_23_25_May12, d2_mod_time_23_25_May12, d3_mod_time_23_25_May12,
+  d4_mod_time_23_25_May12, d5_mod_time_23_25_May12, d6_mod_time_23_25_May12,
+  d7_mod_time_23_25_May12),
+  model_names = c("D1", "D2", "D3", "D4", "D5", "D6", "D7"),
+  top_n = 3,
+  bottom_n = 3,
+  include_ecf = TRUE,
+  caption = "Impact of Predictors on SPPSF"
+) # Top and bottom standardized beta predictors across models
+
+res_extreme$kable
+```
+
+---
+
+```{r pplot2}
+res_beta2 <- codf$plot_avg_beta_lollipop_7models(
+  d1_mod_ln_price_no_ecf_23_25_May12, d2_mod_ln_price_no_ecf_23_25_May12, d3_mod_ln_price_no_ecf_23_25_May12,
+  d4_mod_ln_price_no_ecf_23_25_May12, d5_mod_ln_price_no_ecf_23_25_May12, d6_mod_ln_price_no_ecf_23_25_May12,
+  d7_mod_ln_price_no_ecf_23_25_May12,
+  model_names = c("D1", "D2", "D3", "D4", "D5", "D6", "D7"),
+  top_n = 10,
+  title = "LN_PRICE (- ECF) Models | Standardized Beta Values"
+)
+
+res_beta2$plot
+```
+
+```{r btab2}
+res_extreme_no_ecf <- codf$summarize_extreme_betas_kable(
+  models = list(d1_mod_ln_price_no_ecf_23_25_May12, d2_mod_ln_price_no_ecf_23_25_May12,
+                d3_mod_ln_price_no_ecf_23_25_May12, d4_mod_ln_price_no_ecf_23_25_May12,
+                d5_mod_ln_price_no_ecf_23_25_May12, d6_mod_ln_price_no_ecf_23_25_May12,
+                d7_mod_ln_price_no_ecf_23_25_May12),
+  model_names = c("D1", "D2", "D3", "D4", "D5", "D6", "D7"),
+  top_n = 3,
+  bottom_n = 3,
+  include_ecf = FALSE,
+  caption = "Impact of Predictors on Saleprice (excluding ECFs)"
+)
+
+res_extreme_no_ecf$kable
+```
+
+---
+
+```{r pplot3a, eval=FALSE}
+res_beta3a <- codf$plot_avg_beta_lollipop_7models(
+  d1_mod_base_23_25_May12, d2_mod_base_23_25_May12, d3_mod_base_23_25_May12,
+  d4_mod_base_23_25_May12, d5_mod_base_23_25_May12, d6_mod_base_23_25_May12,
+  d7_mod_base_23_25_May12,
+  model_names = c("D1", "D2", "D3", "D4", "D5", "D6", "D7"),
+  top_n = 10,
+  title = "LN_PRICE Models - Standardized Beta Values"
+)
+
+res_beta3a$plot
+```
+
+```{r pplot3}
+res_beta3 <- codf$plot_avg_beta_lollipop(
+  models = list(d1_mod_base_23_25_May12, d2_mod_base_23_25_May12, d3_mod_base_23_25_May12,
+                d4_mod_base_23_25_May12, d5_mod_base_23_25_May12, d6_mod_base_23_25_May12,
+                d7_mod_base_23_25_May12),
+  model_names = c("D1", "D2", "D3", "D4", "D5", "D6", "D7"),
+  include_ecf = FALSE,
+  top_n = 10,
+  title = "LN_PRICE Models - Standardized Beta Values"
+)
+
+res_beta3$plot
+```
+
+```{r btab3}
+res_extreme3 <- codf$summarize_extreme_betas_kable(
+  models = list(d1_mod_base_23_25_May12, d2_mod_base_23_25_May12, d3_mod_base_23_25_May12,
+                d4_mod_base_23_25_May12, d5_mod_base_23_25_May12, d6_mod_base_23_25_May12,
+                d7_mod_base_23_25_May12),
+  model_names = c("D1", "D2", "D3", "D4", "D5", "D6", "D7"),
+  top_n = 3,
+  bottom_n = 3,
+  include_ecf = FALSE,
+  caption = "Impact of Predictors on Saleprice"
+)
+
+res_extreme3$kable
+```
+
+---
+
+```{r pplot4}
+res_beta4 <- codf$plot_avg_beta_lollipop(
+  models = list(d1_mod_base_inliers_23_25_May12, d2_mod_base_inliers_23_25_May12,
+                d3_mod_base_inliers_23_25_May12, d4_mod_base_inliers_23_25_May12,
+                d5_mod_base_inliers_23_25_May12, d6_mod_base_inliers_23_25_May12,
+                d7_mod_base_inliers_23_25_May12),
+  model_names = c("D1", "D2", "D3", "D4", "D5", "D6", "D7"),
+  include_ecf = FALSE,
+  top_n = 10,
+  title = "LN_PRICE (Inliers) Models - Standardized Beta Values"
+)
+
+res_beta4$plot
+```
+
+```{r btab4}
+res_extreme4 <- codf$summarize_extreme_betas_kable(
+  models = list(d1_mod_base_inliers_23_25_May12, d2_mod_base_inliers_23_25_May12,
+                d3_mod_base_inliers_23_25_May12, d4_mod_base_inliers_23_25_May12,
+                d5_mod_base_inliers_23_25_May12, d6_mod_base_inliers_23_25_May12,
+                d7_mod_base_inliers_23_25_May12),
+  model_names = c("D1", "D2", "D3", "D4", "D5", "D6", "D7"),
+  top_n = 3,
+  bottom_n = 3,
+  include_ecf = FALSE,
+  caption = "Impact of Predictors on Saleprice"
+)
+
+res_extreme4$kable
+```
+
+---
+
+```{r pplot5}
+res_beta5 <- codf$plot_avg_beta_lollipop(
+  models = list(d1_mod_tasp_23_25_May12, d2_mod_tasp_23_25_May12, d3_mod_tasp_23_25_May12,
+                d4_mod_tasp_23_25_May12, d5_mod_tasp_23_25_May12, d6_mod_tasp_23_25_May12,
+                d7_mod_tasp_23_25_May12),
+  model_names = c("D1", "D2", "D3", "D4", "D5", "D6", "D7"),
+  include_ecf = FALSE,
+  top_n = 10,
+  title = "LN_TASP Models - Standardized Beta Values"
+)
+
+res_beta5$plot
+```
+
+```{r btab5}
+res_extreme5 <- codf$summarize_extreme_betas_kable(
+  models = list(d1_mod_tasp_23_25_May12, d2_mod_tasp_23_25_May12, d3_mod_tasp_23_25_May12,
+                d4_mod_tasp_23_25_May12, d5_mod_tasp_23_25_May12, d6_mod_tasp_23_25_May12,
+                d7_mod_tasp_23_25_May12),
+  model_names = c("D1", "D2", "D3", "D4", "D5", "D6", "D7"),
+  top_n = 3,
+  bottom_n = 3,
+  include_ecf = FALSE,
+  caption = "Impact of Predictors on TASP"
+)
+
+res_extreme5$kable
+```
+
+---
+
+```{r pplot6}
+res_beta6 <- codf$plot_avg_beta_lollipop(
+  models = list(d1_mod_alt_23_25_May12, d2_mod_alt_23_25_May12, d3_mod_alt_23_25_May12,
+                d4_mod_alt_23_25_May12, d5_mod_alt_23_25_May12, d6_mod_alt_23_25_May12,
+                d7_mod_alt_23_25_May12),
+  model_names = c("D1", "D2", "D3", "D4", "D5", "D6", "D7"),
+  include_ecf = FALSE,
+  top_n = 10,
+  title = "Alternative LN_TASP Models - Standardized Beta Values"
+)
+
+res_beta6$plot
+```
+
+```{r btab6}
+res_extreme6 <- codf$summarize_extreme_betas_kable(
+  models = list(d1_mod_alt_23_25_May12, d2_mod_alt_23_25_May12, d3_mod_alt_23_25_May12,
+                d4_mod_alt_23_25_May12, d5_mod_alt_23_25_May12, d6_mod_alt_23_25_May12,
+                d7_mod_alt_23_25_May12),
+  model_names = c("D1", "D2", "D3", "D4", "D5", "D6", "D7"),
+  top_n = 3,
+  bottom_n = 3,
+  include_ecf = FALSE,
+  caption = "Impact of Predictors on TASP"
+)
+
+res_extreme6$kable
+```
+
+---
+
+## Results Including Economic Condition Factors
+
+```{r pplot7}
+res_beta7 <- codf$plot_avg_beta_lollipop(
+  models = list(d1_mod_base_23_25_May12, d2_mod_base_23_25_May12, d3_mod_base_23_25_May12,
+                d4_mod_base_23_25_May12, d5_mod_base_23_25_May12, d6_mod_base_23_25_May12,
+                d7_mod_base_23_25_May12),
+  model_names = c("D1", "D2", "D3", "D4", "D5", "D6", "D7"),
+  include_ecf = TRUE,
+  top_n = 10,
+  title = "LN_PRICE Models - Standardized Beta Values"
+)
+
+res_beta7$plot
+```
+
+```{r btab7}
+res_extreme7 <- codf$summarize_extreme_betas_kable(
+  models = list(d1_mod_base_23_25_May12, d2_mod_base_23_25_May12, d3_mod_base_23_25_May12,
+                d4_mod_base_23_25_May12, d5_mod_base_23_25_May12, d6_mod_base_23_25_May12,
+                d7_mod_base_23_25_May12),
+  model_names = c("D1", "D2", "D3", "D4", "D5", "D6", "D7"),
+  top_n = 3,
+  bottom_n = 3,
+  include_ecf = TRUE,
+  caption = "Impact of Predictors on Saleprice"
+)
+
+res_extreme7$kable
+```
+
+---
+
+```{r pplot8}
+res_beta8 <- codf$plot_avg_beta_lollipop(
+  models = list(d1_mod_base_inliers_23_25_May12, d2_mod_base_inliers_23_25_May12,
+                d3_mod_base_inliers_23_25_May12, d4_mod_base_inliers_23_25_May12,
+                d5_mod_base_inliers_23_25_May12, d6_mod_base_inliers_23_25_May12,
+                d7_mod_base_inliers_23_25_May12),
+  model_names = c("D1", "D2", "D3", "D4", "D5", "D6", "D7"),
+  include_ecf = TRUE,
+  top_n = 10,
+  title = "LN_PRICE (Inliers) Models - Standardized Beta Values"
+)
+
+res_beta8$plot
+```
+
+```{r btab8}
+res_extreme8 <- codf$summarize_extreme_betas_kable(
+  models = list(d1_mod_base_inliers_23_25_May12, d2_mod_base_inliers_23_25_May12,
+                d3_mod_base_inliers_23_25_May12, d4_mod_base_inliers_23_25_May12,
+                d5_mod_base_inliers_23_25_May12, d6_mod_base_inliers_23_25_May12,
+                d7_mod_base_inliers_23_25_May12),
+  model_names = c("D1", "D2", "D3", "D4", "D5", "D6", "D7"),
+  top_n = 3,
+  bottom_n = 3,
+  include_ecf = TRUE,
+  caption = "Impact of Predictors on Saleprice"
+)
+
+res_extreme8$kable
+```
+
+---
+
+```{r pplot9}
+res_beta9 <- codf$plot_avg_beta_lollipop(
+  models = list(d1_mod_tasp_23_25_May12, d2_mod_tasp_23_25_May12, d3_mod_tasp_23_25_May12,
+                d4_mod_tasp_23_25_May12, d5_mod_tasp_23_25_May12, d6_mod_tasp_23_25_May12,
+                d7_mod_tasp_23_25_May12),
+  model_names = c("D1", "D2", "D3", "D4", "D5", "D6", "D7"),
+  include_ecf = TRUE,
+  top_n = 10,
+  title = "LN_TASP Models - Standardized Beta Values"
+)
+
+res_beta9$plot
+```
+
+```{r btab9}
+res_extreme9 <- codf$summarize_extreme_betas_kable(
+  models = list(d1_mod_tasp_23_25_May12, d2_mod_tasp_23_25_May12, d3_mod_tasp_23_25_May12,
+                d4_mod_tasp_23_25_May12, d5_mod_tasp_23_25_May12, d6_mod_tasp_23_25_May12,
+                d7_mod_tasp_23_25_May12),
+  model_names = c("D1", "D2", "D3", "D4", "D5", "D6", "D7"),
+  top_n = 3,
+  bottom_n = 3,
+  include_ecf = TRUE,
+  caption = "Impact of Predictors on TASP"
+)
+
+res_extreme9$kable
+```
+
+---
+
+```{r pplot10}
+res_beta10 <- codf$plot_avg_beta_lollipop(
+  models = list(d1_mod_alt_23_25_May12, d2_mod_alt_23_25_May12, d3_mod_alt_23_25_May12,
+                d4_mod_alt_23_25_May12, d5_mod_alt_23_25_May12, d6_mod_alt_23_25_May12,
+                d7_mod_alt_23_25_May12),
+  model_names = c("D1", "D2", "D3", "D4", "D5", "D6", "D7"),
+  include_ecf = TRUE,
+  top_n = 10,
+  title = "Alternative LN_TASP Models - Standardized Beta Values"
+)
+
+res_beta10$plot
+```
+
+```{r btab10}
+res_extreme10 <- codf$summarize_extreme_betas_kable(
+  models = list(d1_mod_alt_23_25_May12, d2_mod_alt_23_25_May12, d3_mod_alt_23_25_May12,
+                d4_mod_alt_23_25_May12, d5_mod_alt_23_25_May12, d6_mod_alt_23_25_May12,
+                d7_mod_alt_23_25_May12),
+  model_names = c("D1", "D2", "D3", "D4", "D5", "D6", "D7"),
+  top_n = 3,
+  bottom_n = 3,
+  include_ecf = TRUE,
+  caption = "Impact of Predictors on TASP"
+)
+
+res_extreme10$kable
+```
+
+
+
+
+
+
+
+
+
+
+
+
+

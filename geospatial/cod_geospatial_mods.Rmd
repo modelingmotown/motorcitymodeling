@@ -1,0 +1,70 @@
+---
+title: "City of Detroit 2023 - 2025 Sales | Geospatial Models"
+author: |
+  | Elliot Dean - Program Analyst IV  
+  | Office of the Chief Financial Officer | Office of the Assessor
+  | City of Detroit
+date: "`r sub('^0', '', format(Sys.Date(), '%d %B %Y'))`"
+geometry: margin = 1.5cm
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+mainfont: Arial
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, error = FALSE, echo = FALSE)
+```
+
+```{r lib_load}
+library(tidyverse)    # data wrangling & ggplot2
+library(janitor)      # functions for examining and cleaning dirty data
+library(kableExtra)   # simple table generator
+library(here)         # Find files within a project
+library(rlang)        # functions for Base Types and Core R and 'Tidyverse' Features
+library(car)          # VIF, influence measures helpers
+library(scales)       # provides the internal scaling infrastructure used by ggplot
+library(sf)           # used for handling and analyzing spatial data
+library(httr2)        # make HTTP requests and handle responses
+library(jsonlite)     # provides functions for parsing and generating JSON data
+library(geosphere)    # Spherical trigonometry for geographic applications
+library(osrm)         # Shortest Paths and Travel Time from OpenStreetMap
+```
+
+---
+
+```{r fun}
+load(file = here("rmds/modfunctions", "modfunctions13.RData"))
+load(file = here("data/rdata", "cod_2022-2025geofin.RData"))
+```
+
+Functions Used: modfunctions_notes.R + modelfunctions.R
+
+
+
+
+---
+
+
+
+```{r}
+
+load(file = here("data/rdata", "cod_2023-2025geo.RData"))
+df3 <- sales_df |> filter(ccd == 7)
+```
+
+```{r}
+library(diffdf)
+
+diffdf(df34, df)
+```
+
+
+```{r}
+dtfds <- sales_df |> filter()
+```
+
+
+
+

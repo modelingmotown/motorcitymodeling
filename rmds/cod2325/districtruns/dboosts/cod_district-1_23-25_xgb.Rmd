@@ -1,0 +1,235 @@
+---
+title: "XGBoost Model for Council District I (2023 - 2025 Sales)"
+author: |
+  | Elliot Dean - Program Analyst IV  
+  | Office of the Chief Financial Officer | Office of the Assessor
+  | City of Detroit
+date: "`r sub('^0', '', format(Sys.Date(), '%d %B %Y'))`"
+geometry: margin = 1.5cm
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+mainfont: Arial
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, error = FALSE, echo = FALSE)
+```
+
+```{r lib_load}
+library(tidyverse)   # data wrangling & ggplot2
+library(janitor)     # functions for examining and cleaning dirty data
+library(kableExtra)  # simple table generator
+library(here)        # Find files within a project
+library(olsrr)       # package for p-value backward elimination
+library(broom)       # summarizes key information about models
+library(rlang)       # functions for Base Types and Core R and 'Tidyverse' Features
+library(car)         # VIF, influence measures helpers
+library(scales)      # provides the internal scaling infrastructure used by ggplot
+library(fastDummies) # Fast Creation of Dummy (Binary) Columns & Rows from Categorical Variables
+library(xgboost)
+library(Matrix)   # sparse matrices
+```
+
+```{r fun, results='hide'}
+codf    <- readRDS(file = here("rmds/modfunctions", "codfunctions.rds"))
+codform <- readRDS(file = here("rmds", "codformulas.rds"))
+
+codf_env <- list2env(codf, parent = globalenv())
+for (nm in names(codf)) {environment(codf[[nm]]) <- codf_env}
+list2env(codf, envir = codf_env)
+```
+
+```{r data_import}
+df <- read_csv(here("data/city", "salesSFapr2023toMarch2025Updated.csv")) |>
+  rename_with(tolower) |> filter(ccd == 1)
+
+res23    <- codf$prep_cod_sales(df, origin_month = as.Date("2023-04-01"))
+df       <- res23$data
+ecfs_col <- res23$ecfs_col
+```
+
+```{r data_org}
+df <- sales_df
+```
+
+
+```{r data_prep}
+# If you haven't already, source the file that defines the formulas:
+# source("cfunc11.r")  # contains formula_time, formula_ln_price_no_ecf, formula_base, formula_ln_tasp, formula_alt :contentReference[oaicite:1]{index=1}
+# If formula_base / formula_ln_tasp / formula_alt depend on ecfs_col, make sure it's defined:
+# (Only needed if you're using those formulas and ecfs_col wasn't created earlier.)
+if (!exists("ecfs_col")) {ecfs_col <- grep("^secf_", names(df), value = TRUE)}
+
+# --- helper: build X and y for xgboost from ANY formula ---
+make_xy_xgb <- function(data, formula, sparse = TRUE, drop_intercept = TRUE,
+                        na_action = stats::na.omit) {
+  # Freeze rows to the exact ones usable by this formula
+  mf <- model.frame(formula, data = data, na.action = na_action)  # y = response
+  y <- model.response(mf)
+  y <- as.numeric(y)
+  # Build terms for predictors only
+  if (drop_intercept) {    # remove intercept from predictors (xgboost doesn't need it)
+    tt <- delete.response(terms(update(formula, . ~ . - 1), data = mf))
+  } else {tt <- delete.response(terms(formula, data = mf))}
+  # X = model matrix (dense or sparse)
+  X <- if (sparse) {Matrix::sparse.model.matrix(tt, data = mf)} else {
+    stats::model.matrix(tt, data = mf)}
+
+  list(X = X, y = y, feature_names = colnames(X), mf = mf)
+}
+# --- build X/y for each formula in cfunc11.r :contentReference[oaicite:2]{index=2} ---
+xy_time            <- make_xy_xgb(df, codform$formula_time)
+xy_ln_price_no_ecf <- make_xy_xgb(df, codform$formula_ln_price_no_ecf)
+xy_base            <- make_xy_xgb(df, codform$formula_base)
+xy_ln_tasp         <- make_xy_xgb(df, codform$formula_ln_tasp)
+xy_alt             <- make_xy_xgb(df, codform$formula_alt)
+
+# --- export as plain X / y variables (what you asked for) ---
+X_time <- xy_time$X; y_time <- xy_time$y
+
+X_ln_price_no_ecf <- xy_ln_price_no_ecf$X; y_ln_price_no_ecf <- xy_ln_price_no_ecf$y
+X_base            <- xy_base$X;            y_base            <- xy_base$y
+
+X_ln_tasp <- xy_ln_tasp$X; y_ln_tasp <- xy_ln_tasp$y
+X_alt     <- xy_alt$X;     y_alt     <- xy_alt$y
+
+# (Optional) xgboost DMatrix objects (usually what you actually feed xgboost)
+dtime   <- xgb.DMatrix(data = X_time,            label = y_time)
+dprice0 <- xgb.DMatrix(data = X_ln_price_no_ecf, label = y_ln_price_no_ecf)
+dbase   <- xgb.DMatrix(data = X_base,            label = y_base)
+dtasp   <- xgb.DMatrix(data = X_ln_tasp,         label = y_ln_tasp)
+dalt    <- xgb.DMatrix(data = X_alt,             label = y_alt)
+```
+
+
+---
+
+## Model I
+
+```{r}
+df_taf_xgb <- make_time_adjusted_df_xgb(
+  df = df,
+  formula_time = formula_time,
+  nrounds = 1000,
+  verbose = 1
+)
+```
+
+
+
+
+```{r mod1}
+cod <- function(r) {
+  r <- r[is.finite(r)]
+  med <- median(r, na.rm = TRUE)
+  100 * mean(abs(r - med), na.rm = TRUE) / med
+}
+
+prd <- function(pred, actual) {
+  ok <- is.finite(pred) & is.finite(actual) & actual > 0
+  p <- pred[ok]; a <- actual[ok]
+  r <- p / a
+  mean_r <- mean(r, na.rm = TRUE)
+  wmean_r <- sum(p, na.rm = TRUE) / sum(a, na.rm = TRUE)
+  mean_r / wmean_r
+}
+
+prb <- function(pred, actual) {
+  ok <- is.finite(pred) & is.finite(actual) & actual > 0
+  p <- pred[ok]; a <- actual[ok]
+  r <- p / a
+  med <- median(r, na.rm = TRUE)
+  dev_pct <- (r - med) / med * 100
+  vproxy <- (p + a) / 2
+  x <- log(vproxy) - mean(log(vproxy), na.rm = TRUE)
+  coef(lm(dev_pct ~ x))[["x"]] / 100
+}
+
+# Train/test split (quick)
+set.seed(123)
+
+n <- nrow(X_time)
+train_idx <- sample(seq_len(n), size = floor(0.8 * n))
+test_idx  <- setdiff(seq_len(n), train_idx)
+
+dtrain <- xgb.DMatrix(
+  data  = X_time[train_idx, , drop = FALSE],
+  label = y_time[train_idx]
+)
+
+dtest <- xgb.DMatrix(
+  data  = X_time[test_idx, , drop = FALSE],
+  label = y_time[test_idx]
+)
+
+mod_xgb <- xgb.train(
+  params = list(objective = "reg:squarederror",eval_metric = "rmse"), data = dtrain,
+  nrounds = 2000, watchlist = list(train = dtrain, test = dtest),
+  early_stopping_rounds = 50, verbose = 1
+)
+
+# Predict back on full df_xgb (or just test)
+pred_ln <- predict(mod_xgb, newdata = dtest)
+# df_xgb <- df %>%  mutate(pred_lnx = pred_ln, espx = exp(pred_ln), ratiox = espx / tasp)
+
+df_test <- df[test_idx, , drop = FALSE] %>%
+  dplyr::mutate(pred_lnx = pred_ln, espx = exp(pred_lnx), ratiox = espx / tasp)
+
+assess_stats_xgb <- df_test %>%
+  summarise(
+    n = n(), median_ratio = median(ratiox, na.rm = TRUE),
+    mean_ratio   = mean(ratiox, na.rm = TRUE),
+    wmean_ratio  = sum(espx, na.rm = TRUE) / sum(tasp, na.rm = TRUE),
+    prd = prd(espx, tasp), cod = cod(ratiox), prb = prb(espx, tasp)
+  )
+
+assess_stats_xgb
+```
+
+```{r mod1a, results='asis'}
+codf$model_metrics_A(mod_time, "District 1 LN\\_SPPSF model fit statistics")
+codf$coef_table(mod_time, "District 1 LN\\_SPPSF model coefficients (95% CI)")
+```
+
+```{r mod1b}
+mf <- model.frame(mod_time)
+row_idx <- as.integer(rownames(mf))
+aug_sppsf <- broom::augment(mod_time, data = df[row_idx, ]) |>
+  dplyr::mutate(pred_sppsf = exp(.fitted), std_resid  = .std.resid)
+codf$plot_residuals_vs_months(aug_sppsf, ptitle = "Residuals for LN_SPPSF Model")
+```
+
+```{r mod1c}
+codf$plot_predicted_sppsf_vs_months(aug_sppsf, ptitle = "Months vs Predicted SPPSF - LN_SPPSF Model")
+```
+
+```{r mod1d}
+codf$plot_price_index_vs_months(df)
+```
+
+```{r mod1e}
+codf$plot_taf_vs_months(df)
+```
+
+---
+
+## Model II
+
+```{r mod2}
+mod_ln_price_no_ecf <- codf$backward_p(codform$formula_ln_price_no_ecf,
+                                  data = df, p_out = 0.10, verbose = TRUE)
+
+codf$plot_standard_residual_hist(mod_ln_price_no_ecf, df,
+                                 ptitle = "Histogram\nDependent Variable: LN_PRICE (No ECFs)")
+```
+
+
+
+
+
+
+
+
+

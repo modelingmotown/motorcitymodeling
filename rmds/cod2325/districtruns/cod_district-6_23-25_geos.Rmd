@@ -1,0 +1,487 @@
+---
+title: "District 6 Model Comparison - Geospatial Data: 2023 - 2025 Sales"
+author: |
+  | Elliot Dean - Program Analyst IV  
+  | Office of the Chief Financial Officer | Office of the Assessor
+  | City of Detroit
+date: "`r sub('^0', '', format(Sys.Date(), '%d %B %Y'))`"
+geometry: margin = 1.5cm
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+mainfont: Arial
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, error = FALSE, echo = FALSE)
+```
+
+```{r lib_load}
+library(tidyverse)   # data wrangling & ggplot2
+library(janitor)     # functions for examining and cleaning dirty data
+library(kableExtra)  # simple table generator
+library(here)        # Find files within a project
+library(olsrr)       # package for p-value backward elimination
+library(broom)       # summarizes key information about models
+library(rlang)       # functions for Base Types and Core R and 'Tidyverse' Features
+library(car)         # VIF, influence measures helpers
+library(scales)      # provides the internal scaling infrastructure used by ggplot
+library(effects)     # Effect Displays for Linear, Generalized Linear, and Other Models
+```
+
+```{r fun, results='hide'}
+codf     <- readRDS(file = here("rmds/modfunctions", "codfunctions.rds"))
+codform  <- readRDS(file = here("rmds", "codformulas.rds"))
+codf_env <- list2env(codf, parent = globalenv())
+for (nm in names(codf)) {environment(codf[[nm]]) <- codf_env}
+list2env(codf, envir = codf_env)
+source(here("rmds/cod2325/districtruns/d2325f", "spss_cod_district-7_23-25f.R"), local = knitr::knit_global())
+```
+
+```{r setup1}
+data_path <- here("data/city", "CCD7_2023-2025_Data.sav")  
+ecf_keep <- NULL       # Optional: add ECF filters here if needed
+base_ecf <- "7r709"    # Base ECF in the SPSS syntax
+cook_case_count <- 2668
+forced_terms <- character(0)
+
+load(file = here("data/rdata", "cod_2023-2025geo.RData"))
+load(file = here("rmds/cod2325/districtruns/dmods", "spss_cod_district-6_23-25_June2.RData"))
+load(file = here("rmds/cod2325/districtruns/dmods", "spss_cod_district-6_23-25geo_July21.RData"))
+```
+
+## Model I
+
+```{r mod1gcm}
+mcomp <- make_metrics_kable_lm(
+  spss_mod = d6_mod_time_23_25_June2, spss_label = "Control", r_label = "+ Geospatial",
+  r_mod = d6_mod_time_23_25geo_July21, pct_label = "% Difference",
+  caption = "Model Metrics: LN-SPPSF Model Comparison", include_aic_bic = TRUE, digits = 4
+)
+mcomp$kable
+```
+
+```{r mod1gca}
+ratio_comp <- make_ratio_metrics_kable_lm(
+  spss_mod = d6_mod_time_23_25_June2, spss_label = "Control", r_label = "+ Geospatial",
+  r_mod = d6_mod_time_23_25geo_July21, pct_label = "% Difference",
+  caption = "Ratio Metrics: LN-SPPSF Model Comparison",
+  response_is_logged = TRUE
+  # For a log-normal correction: correction_factor_r = exp(0.5 * sigma(mod_r)^2)
+)
+ratio_comp$kable
+```
+
+---
+
+## Model II
+
+```{r mod2gcm}
+mcomp2 <- make_metrics_kable_lm(
+  spss_mod = d6_mod_ln_price_no_ecf_23_25_June2, spss_label = "Control", r_label = "+ Geospatial",
+  r_mod = d6_mod_ln_price_no_ecf_23_25geo_July21, pct_label = "% Difference",
+  caption = "Model Metrics: LN-PRICE (No ECF) Model Comparison", include_aic_bic = TRUE, digits = 4
+)
+mcomp2$kable
+```
+
+```{r mod2gca}
+ratio_comp2 <- make_ratio_metrics_kable_lm(
+  spss_mod = d6_mod_ln_price_no_ecf_23_25_June2, spss_label = "Control", r_label = "+ Geospatial",
+  r_mod = d6_mod_ln_price_no_ecf_23_25geo_July21, pct_label = "% Difference",
+  caption = "Ratio Metrics: LN-PRICE (No ECF) Model Comparison",
+  response_is_logged = TRUE
+  # For a log-normal correction: correction_factor_r = exp(0.5 * sigma(mod_r)^2)
+)
+ratio_comp2$kable
+```
+
+---
+
+## Model III
+
+```{r mod3gcm}
+mcomp3 <- make_metrics_kable_lm(
+  spss_mod = d6_mod_base_23_25_June2, spss_label = "Control", r_label = "+ Geospatial",
+  r_mod = d6_mod_base_23_25geo_July21, pct_label = "% Difference",
+  caption = "Model Metrics: LN-PRICE Model Comparison", include_aic_bic = TRUE, digits = 4
+)
+mcomp3$kable
+```
+
+```{r mod3gca}
+ratio_comp3 <- make_ratio_metrics_kable_lm(
+  spss_mod = d6_mod_base_23_25_June2, spss_label = "Control", r_label = "+ Geospatial",
+  r_mod = d6_mod_base_23_25geo_July21, pct_label = "% Difference",
+  caption = "Ratio Metrics: LN-PRICE Model Comparison",
+  response_is_logged = TRUE
+  # For a log-normal correction: correction_factor_r = exp(0.5 * sigma(mod_r)^2)
+)
+ratio_comp3$kable
+```
+
+---
+
+## Model IV
+
+```{r mod4gcm}
+mcomp4 <- make_metrics_kable_lm(
+  spss_mod = d6_mod_base_inliers_23_25_June2, spss_label = "Control", r_label = "+ Geospatial",
+  r_mod = d6_mod_base_inliers_23_25geo_July21, pct_label = "% Difference",
+  caption = "Model Metrics: LN-PRICE (Inliers) Model Comparison", include_aic_bic = TRUE, digits = 4
+)
+mcomp4$kable
+```
+
+```{r mod4gca}
+ratio_comp4 <- make_ratio_metrics_kable_lm(
+  spss_mod = d6_mod_base_inliers_23_25_June2, spss_label = "Control", r_label = "+ Geospatial",
+  r_mod = d6_mod_base_inliers_23_25geo_July21, pct_label = "% Difference",
+  caption = "Ratio Metrics: LN-PRICE (Inliers) Model Comparison",
+  response_is_logged = TRUE
+  # For a log-normal correction: correction_factor_r = exp(0.5 * sigma(mod_r)^2)
+)
+ratio_comp4$kable
+```
+
+---
+
+## Model V
+
+```{r mod5gcm}
+mcomp5 <- make_metrics_kable_lm(
+  spss_mod = d6_mod_tasp_23_25_June2, spss_label = "Control", r_label = "+ Geospatial",
+  r_mod = d6_mod_tasp_23_25geo_July21, pct_label = "% Difference",
+  caption = "Model Metrics: LN-TASP Model Comparison", include_aic_bic = TRUE, digits = 4
+)
+mcomp5$kable
+```
+
+```{r mod5gca}
+ratio_comp5 <- make_ratio_metrics_kable_lm(
+  spss_mod = d6_mod_tasp_23_25_June2, spss_label = "Control", r_label = "+ Geospatial",
+  r_mod = d6_mod_tasp_23_25geo_July21, pct_label = "% Difference",
+  caption = "Ratio Metrics: LN-TASP Model Comparison",
+  response_is_logged = TRUE
+  # For a log-normal correction: correction_factor_r = exp(0.5 * sigma(mod_r)^2)
+)
+ratio_comp5$kable
+```
+
+---
+
+## Model VI
+
+```{r mod6gcm}
+mcomp6 <- make_metrics_kable_lm(
+  spss_mod = d6_mod_alt_23_25_June2, spss_label = "Control", r_label = "+ Geospatial",
+  r_mod = d6_mod_alt_23_25geo_July21, pct_label = "% Difference",
+  caption = "Model Metrics: LN-TASP Model II Comparison", include_aic_bic = TRUE, digits = 4
+)
+mcomp6$kable
+```
+
+```{r mod6gca}
+ratio_comp6 <- make_ratio_metrics_kable_lm(
+  spss_mod = d6_mod_alt_23_25_June2, spss_label = "Control", r_label = "+ Geospatial",
+  r_mod = d6_mod_alt_23_25geo_July21, pct_label = "% Difference",
+  caption = "Ratio Metrics: LN-TASP Model II Comparison",
+  response_is_logged = TRUE
+  # For a log-normal correction: correction_factor_r = exp(0.5 * sigma(mod_r)^2)
+)
+ratio_comp6$kable
+```
+
+---
+
+## Model Comparison
+
+```{r coef7, eval=FALSE}
+res_extreme <- summarize_extreme_betas_kable(
+  mod_time, mod_no_ecf, mod_1, mod_2, mod_3, mod_4,
+  model_names = c("M1", "M2", "M3", "M4", "M5", "M6"),
+  top_n = 3,
+  bottom_n = 3,
+  caption = "Top and Bottom Standardized Beta Predictors across Models"
+)
+
+res_extreme$kable
+```
+
+```{r blp7}
+res_beta7 <- plot_avg_beta_lollipop_6model(
+  d6_mod_time_23_25_June2, d6_mod_ln_price_no_ecf_23_25_June2,
+  d6_mod_base_23_25_June2, d6_mod_base_inliers_23_25_June2,
+  d6_mod_tasp_23_25_June2, d6_mod_alt_23_25_June2, include_ecf = FALSE,
+  model_names = c("M1", "M2", "M3", "M4", "M5", "M6"), top_n = 5,
+  title = "District 6 | Avg Std Beta across Initial Models"
+)
+res_beta7$plot
+```
+
+```{r blp8}
+res_beta8 <- plot_avg_beta_lollipop_6model(
+  d6_mod_time_23_25geo_July21, d6_mod_ln_price_no_ecf_23_25geo_July21,
+  d6_mod_base_23_25geo_July21, d6_mod_base_inliers_23_25geo_July21,
+  d6_mod_tasp_23_25geo_July21, d6_mod_alt_23_25geo_July21, include_ecf = FALSE,
+  model_names = c("M1", "M2", "M3", "M4", "M5", "M6"), top_n = 5,
+  title = "District 6 | Avg Std Beta across Geospatial Models"
+)
+res_beta8$plot
+```
+
+```{r modsav, eval=FALSE}
+d6_mod_time_23_25geo_July21 <- mod_time
+d6_mod_ln_price_no_ecf_23_25geo_July21 <- mod_no_ecf
+d6_mod_base_23_25geo_July21 <- mod_1
+d6_mod_base_inliers_23_25geo_July21 <- mod_2
+d6_mod_tasp_23_25geo_July21 <- mod_3
+d6_mod_alt_23_25geo_July21 <- mod_4
+
+save(d6_mod_time_23_25geo_July21, d6_mod_ln_price_no_ecf_23_25geo_July21,
+     d6_mod_base_23_25geo_July21, d6_mod_base_inliers_23_25geo_July21,
+     d6_mod_tasp_23_25geo_July21, d6_mod_alt_23_25geo_July21,
+     file = here("rmds/cod2325/districtruns/dmods", "spss_cod_district-7_23-25geo_July21.RData"))
+```
+
+---
+
+## Prediction Testing
+
+```{r mod1apreds}
+res_dev1a <- summarize_saleprice_deviation_kable(
+  model = d6_mod_time_23_25_June2,
+  data = df6,
+  title = "Deviation Summary: Initial LN-SPPSF Model",
+  response_type = "sppsf",
+  response_is_logged = TRUE,
+  floorarea_col = "sresb_floorarea"
+)
+res_dev1a$kable
+```
+
+```{r mod1bpreds}
+res_dev1b <- summarize_saleprice_deviation_kable(
+  model = d6_mod_time_23_25geo_July21,
+  data = df6,
+  title = "Deviation Summary: LN-SPPSF Model + Geospatials",
+  response_type = "sppsf",
+  response_is_logged = TRUE,
+  floorarea_col = "sresb_floorarea"
+)
+res_dev1b$kable
+```
+
+```{r mod1predict, eval=FALSE}
+resm1 <- predict_property_value_by_parcel(
+  model = mod_time,
+  data = df,
+  parcel_id = "22024510.",
+  parcel_col = "parcelno",
+  response_type = "sppsf",
+  response_is_logged = TRUE,
+  floorarea_col = "sresb_floorarea"
+)
+resm1$parcel_id
+resm1$predicted_saleprice
+
+res_dev1 <- summarize_saleprice_deviation_kable(
+  model = mod_time,
+  data = df,
+  title = "Deviation Summary: LN-SPPSF Model",
+  response_type = "sppsf",
+  response_is_logged = TRUE,
+  floorarea_col = "sresb_floorarea"
+)
+
+res_dev1$kable
+```
+
+```{r mod2predict, eval=FALSE}
+resm2 <- predict_property_value_by_parcel(
+  model = mod_no_ecf,
+  data = df,
+  parcel_id = "22024510.",
+  parcel_col = "parcelno",
+  response_type = "saleprice",
+  response_is_logged = TRUE
+)
+resm2$parcel_id
+resm2$predicted_saleprice
+
+res_dev2 <- summarize_saleprice_deviation_kable(
+  model = mod_no_ecf,
+  data = df,
+  title = "Deviation Summary: LN-PRICE - No ECFs Model",
+  response_type = "saleprice",
+  response_is_logged = TRUE
+)
+
+res_dev2$kable
+```
+
+```{r mod3predict, eval=FALSE}
+resm3 <- predict_property_value_by_parcel(
+  model = mod_1,
+  data = df,
+  parcel_id = "22024510.",
+  parcel_col = "parcelno",
+  response_type = "saleprice",
+  response_is_logged = TRUE
+)
+resm3$parcel_id
+resm3$predicted_saleprice
+
+res_dev3 <- summarize_saleprice_deviation_kable(
+  model = mod_1,
+  data = df,
+  title = "Deviation Summary: LN-PRICE Model",
+  response_type = "saleprice",
+  response_is_logged = TRUE
+)
+
+res_dev3$kable
+```
+
+```{r mod4predict, eval=FALSE}
+resm4 <- predict_property_value_by_parcel(
+  model = mod_2,
+  data = df_in,
+  parcel_id = "22024510.",
+  parcel_col = "parcelno",
+  response_type = "saleprice",
+  response_is_logged = TRUE
+)
+resm4$parcel_id
+resm4$predicted_saleprice
+
+res_dev4 <- summarize_saleprice_deviation_kable(
+  model = mod_2,
+  data = df_in,
+  title = "Deviation Summary: LN-PRICE - Outliers Model",
+  response_type = "saleprice",
+  response_is_logged = TRUE
+)
+
+res_dev4$kable
+```
+
+```{r mod5predict, eval=FALSE}
+resm5 <- predict_property_value_by_parcel(
+  model = mod_3,
+  data = df_in,
+  parcel_id = "22024510.",
+  parcel_col = "parcelno",
+  response_type = "saleprice",
+  response_is_logged = TRUE
+)
+resm5$parcel_id
+resm5$predicted_saleprice
+
+res_dev5 <- summarize_saleprice_deviation_kable(
+  model = mod_3,
+  data = df_in,
+  title = "Deviation Summary: LN-TASP Model I",
+  response_type = "saleprice",
+  response_is_logged = TRUE
+)
+
+res_dev5$kable
+```
+
+```{r mod6predict, eval=FALSE}
+resm6 <- predict_property_value_by_parcel(
+  model = mod_4,
+  data = df_in,
+  parcel_id = "22024510.",
+  parcel_col = "parcelno",
+  response_type = "saleprice",
+  response_is_logged = TRUE
+)
+resm6$parcel_id
+resm6$predicted_saleprice
+
+res_dev6 <- summarize_saleprice_deviation_kable(
+  model = mod_4,
+  data = df_in,
+  title = "Deviation Summary: LN-TASP Model II",
+  response_type = "saleprice",
+  response_is_logged = TRUE
+)
+
+res_dev6$kable
+```
+
+```{r model4predictions, eval=FALSE}
+df_pred_mod2 <- predict_property_values_df(
+  model = mod_2,
+  data = df_in,
+  response_type = "saleprice",
+  response_is_logged = TRUE
+)
+
+
+```
+
+
+```{r t3st, eval=FALSE}
+pred_dfm4l <- df_pred_mod2 %>%
+  dplyr::select(parcelno, saleprice, pred_saleprice, pred_saleprice_diff,
+                sresb_floorarea, taf_recal) %>%
+  dplyr::arrange(pred_saleprice_diff) %>%
+  dplyr::slice_head(n = 10)
+
+pred_dfm4l
+```
+
+```{r t3st2, eval=FALSE}
+pred_dfm4h <- df_pred_mod2 %>%
+  dplyr::select(parcelno, saleprice, pred_saleprice, pred_saleprice_diff,
+                sresb_floorarea, taf_recal) %>%
+  dplyr::arrange(dplyr::desc(pred_saleprice_diff)) %>%
+  dplyr::slice_head(n = 10)
+
+pred_dfm4h
+```
+
+
+```{r mod5dev, eval=FALSE}
+res_dev5m <- summarize_saleprice_deviation_kabl3(
+  model = mod_3,
+  data = df_in,
+  title = "Deviation Summary: Time-Adjusted Model I",
+  response_type = "time_adjusted_saleprice",
+  response_is_logged = TRUE,
+  floorarea_col = "sresb_floorarea",
+  taf_col = "taf_recal"
+)
+
+res_dev5m$kable
+```
+
+```{r mod6dev, eval=FALSE}
+res_dev6m <- summarize_saleprice_deviation_kabl3(
+  model = mod_4,
+  data = df_in,
+  title = "Deviation Summary: Time-Adjusted Model II",
+  response_type = "time_adjusted_saleprice",
+  response_is_logged = TRUE,
+  floorarea_col = "sresb_floorarea",
+  taf_col = "taf_recal"
+)
+
+res_dev6m$kable
+```
+
+
+
+
+
+
+
+
+
+
+
+

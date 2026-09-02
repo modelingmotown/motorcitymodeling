@@ -1,0 +1,34 @@
+---
+title: "Model Functions"
+author: "Elliot Dean"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Functions for use with models
+
+```{r fun}
+load(file = here("rmds/modfunctions", "modfunctions13.RData"))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,330 @@
+---
+title: "City of Detroit 2022 - 2025 Sales NLM"
+author: |
+  | Elliot Dean - Program Analyst IV  
+  | Office of the Chief Financial Officer | Office of the Assessor
+  | City of Detroit
+date: "`r sub('^0', '', format(Sys.Date(), '%d %B %Y'))`"
+geometry: margin = 1.5cm
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+mainfont: Arial
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, error = FALSE, echo = FALSE)
+```
+
+```{r lib_load}
+library(tidyverse)   # data wrangling & ggplot2
+library(janitor)     # functions for examining and cleaning dirty data
+library(kableExtra)  # simple table generator
+library(here)        # Find files within a project
+library(olsrr)       # package for p-value backward elimination
+library(broom)       # summarizes key information about models
+library(rlang)       # functions for Base Types and Core R and 'Tidyverse' Features
+library(car)         # VIF, influence measures helpers
+library(scales)      # provides the internal scaling infrastructure used by ggplot
+library(mgcv)        # Mixed GAM Computation Vehicle
+library(fastDummies) # Fast Creation of Dummy (Binary) Columns & Rows from Categorical Variables
+library(diffdf)      # tools for working with data frame difference
+library(gratia)      # ggplot’based graphics + utility functions for working with GAMs
+```
+
+---
+
+```{r fun}
+load(file = here("rmds/modfunctions", "modfunctions11.RData"))
+```
+
+Functions Used: modfunctions_notes.R + modelfunctions.R
+
+```{r dataload}
+load(file = here("data/rdata", "cod2022-2025.RData"))
+#df <- dfa
+df       <- cod24$data
+ecfs_col <- cod24$ecfs_col
+```
+
+R Data File: cod2022-2025.RData
+Original Data Files:
+salesSFapr2023toMarch2025Updated.csv + 
+SFResiSalesJUN2022-MAY2024_w-Exterior1.csv
+
+---
+
+## Model I
+
+```{r mod1}
+formula_time <- ln_sppsf ~ arterial + single_family1story + half_duplex1story + half_duplex2story +
+  smallest + small + large + largest + # s(lnsbldsf, bs="cs", k=10)
+  two_plus_baths + powder_room + # s(totalbath, bs="cs", k=6)
+  good + fair + poor + very_poor_unsound + qabove_avg + qbelow_avg + # citycd
+  s(sresb_yearbuilt, bs = "cs", k = 10) + crawl + slab + s(ln_garagespaces, bs = "cs", k = 4) +
+  fireplace + hot_water + elec_baseboard + wall + central_air + s(months, bs = "cs", k = 10)
+
+mod_time <- gam(
+  formula_time, data = df, method = "REML", select = TRUE # adds an extra penalty to the null space of the basis
+  #                            method = "GCV.Cp" , select = FALSE                                
+)
+#summary(mod_time)
+
+df <- add_smooth_time_index(df, mod_time) 
+```
+
+```{r mod1m, results='asis'}
+model_metrics_A(mod_time, "LN\\_SPPSF model fit statistics")
+gct1 <- gam_coef_table(mod_time, "LN\\_SPPSF model coefficients (95% CI)", format = "latex")
+gct1$kable
+```
+
+---
+
+## Model II
+
+```{r mod2}
+formula_ln_price_no_ecf <- ln_price ~
+  s(ln_landratio, bs = "cs", k = 10) + s(ln_base_bldgsize_ratio, bs = "cs", k = 10) +
+  arterial + single_family1story + half_duplex1story + half_duplex2story +
+  smallest + small + large + largest + two_plus_baths + powder_room +
+  good + fair + poor + very_poor_unsound + qabove_avg + qbelow_avg +
+  s(sresb_yearbuilt, bs = "cs", k = 10) + crawl + slab + s(ln_garagespaces, bs = "cs", k = 4) +
+  fireplace + hot_water + elec_baseboard + wall + central_air + s(months, bs = "cs", k = 10)
+
+mod_ln_price_no_ecf <- gam(formula_ln_price_no_ecf, data = df, method = "REML", select = TRUE)
+
+#summary(mod_ln_price_no_ecf)
+```
+
+```{r mod2m, results='asis'}
+model_metrics_A(mod_ln_price_no_ecf, "LN\\_PRICE (No ECFs) model fit statistics")
+gct2 <- gam_coef_table(mod_ln_price_no_ecf, "LN\\_PRICE (No ECFs) model coefficients (95% CI)", format = "latex")
+gct2$kable
+```
+
+---
+
+## Model III
+
+```{r mod3}
+formula_base <- ln_price ~
+  s(ln_landratio, bs = "cs", k = 10) + s(ln_base_bldgsize_ratio, bs = "cs", k = 10) + arterial +
+  single_family1story + half_duplex1story + half_duplex2story + smallest + small + large + largest +
+  two_plus_baths + powder_room + good + fair + poor + very_poor_unsound +
+  qabove_avg + qbelow_avg + s(sresb_yearbuilt, bs = "cs", k = 10) + crawl + slab +
+  s(ln_garagespaces, bs = "cs", k = 4) +
+  fireplace + hot_water + elec_baseboard + wall + central_air + s(months, bs = "cs", k = 10) + ecf
+
+mod_base <- gam(formula_base, data = df, method = "REML", select = TRUE)
+
+#summary(mod_base)
+
+df <- df %>%
+  mutate(pre_1 = predict(mod_base, newdata = df), esp1  = exp(pre_1), ratio1 = esp1 / saleprice)
+
+ratio_ecf   <- ratio_by(df, esp1, saleprice, ecf)
+ratio_style <- ratio_by(df, esp1, saleprice, sresb_style)
+ratio_cond  <- ratio_by(df, esp1, saleprice, scond)
+ratio_size  <- ratio_by(df, esp1, saleprice, size)
+ratio_era   <- ratio_by(df, esp1, saleprice, erabuilt)
+ratio_fire  <- ratio_by(df, esp1, saleprice, fireplace)
+ratio_priceclass <- ratio_by(df, esp1, saleprice, priceclass)
+
+# Within bands (10/20/50)
+df <- df %>%
+  mutate(
+    within10_1 = if_else(ratio1 >= 0.9 & ratio1 <= 1.1, 1L, 0L),
+    within20_1 = if_else(ratio1 >= 0.8 & ratio1 <= 1.2, 1L, 0L),
+    within50_1 = if_else(ratio1 >= 0.5 & ratio1 <= 1.5, 1L, 0L)
+  )
+
+# 22) Outlier / influence removal (SPSS: COOK > 4/N, |SDRESID| > 2)
+N_total <- nrow(df)
+infl <- influence.measures(mod_base)
+cook <- cooks.distance(mod_base)
+stud <- rstudent(mod_base)
+
+rows_used <- as.integer(rownames(model.frame(mod_base)))  # row numbers from the data used in lm()
+
+df <- df %>%
+  mutate(cook_1 = NA_real_,    stud_1  = NA_real_) |> 
+  mutate(
+    cook_1 = replace(cook_1, rows_used, cook),    stud_1 = replace(stud_1, rows_used, stud),
+    in_inlier = if_else(cook_1 <= (4 / N_total) & abs(stud_1) <= 2, 1L, 0L)
+    )
+
+df_in <- df %>% filter(in_inlier == 1)
+
+mod_base_inliers <- gam(formula_base, data = df_in, method = "REML", select = TRUE)
+#summary(mod_base_inliers)
+
+df_in <- df_in %>%
+  mutate(
+    pre_2 = predict(mod_base_inliers, newdata = df_in),
+    esp2  = exp(pre_2),    ratio2 = esp2 / saleprice,
+    within10_2 = if_else(ratio2 >= 0.9 & ratio2 <= 1.1, 1L, 0L),
+    within20_2 = if_else(ratio2 >= 0.8 & ratio2 <= 1.2, 1L, 0L),
+    within50_2 = if_else(ratio2 >= 0.5 & ratio2 <= 1.5, 1L, 0L)
+  )
+
+df_in <- add_smooth_time_index(df_in, mod_base_inliers) 
+
+```
+
+```{r mod3m, results='asis'}
+model_metrics_A(mod_base, "LN\\_PRICE (+ ECFs) model fit statistics")
+gct3 <- gam_coef_table(mod_base, "LN\\_PRICE (+ ECFs) model coefficients (95% CI)", format = "latex")
+gct3$kable
+```
+
+```{r mod3ad}
+rrmetrics <- ratio_metrics(df, esp1, saleprice)    # Assessing metrics output
+
+knitr::kable(
+  rrmetrics,  format = "latex",  booktabs = TRUE,  caption  = "LN\\_PRICE model (base) assessing coefficients"  
+) %>%  kable_styling(latex_options = c("hold_position", "striped", "scale_down"), font_size = 8)
+```
+
+```{r m3vif, results='asis', eval=FALSE}
+safe_vif_kable(mod_base)
+```
+
+---
+
+## Model IV
+
+```{r mod4}
+formula_ln_tasp <- ln_tasp ~
+  s(ln_landratio, bs = "cs", k = 10) + s(ln_base_bldgsize_ratio, bs = "cs", k = 10) + arterial +
+  single_family1story + half_duplex1story + half_duplex2story +
+  smallest + small + large + largest + two_plus_baths + powder_room +
+  good + fair + poor + very_poor_unsound + qabove_avg + qbelow_avg +
+  s(sresb_yearbuilt, bs = "cs", k = 10) + crawl + slab + s(ln_garagespaces, bs = "cs", k = 4) +
+  fireplace + hot_water + elec_baseboard + wall + central_air + ecf + # s(ecf, bs = "re") +
+  s(months, bs = "cs", k = 10)
+
+mod_tasp <- gam(formula_ln_tasp, data = df_in, method = "REML", select = TRUE)
+
+#summary(mod_tasp)
+
+df_in <- df_in %>%
+  mutate(pre_3 = predict(mod_tasp, newdata = df_in), esp3  = exp(pre_3), ratio3 = esp3 / tasp)
+```
+
+```{r mod4m, results='asis'}
+model_metrics_A(mod_tasp, "LN\\_TASP model fit statistics")
+gct4 <- gam_coef_table(mod_tasp, "LN\\_TASP model coefficients (95% CI)", format = "latex")
+gct4$kable
+```
+
+```{r mod4ad}
+rrmetrics <- ratio_metrics(df_in, esp3, saleprice)
+
+knitr::kable(
+  rrmetrics, format = "latex", booktabs = TRUE,  caption = "LN\\_TASP model assessing coefficients"  
+) %>%  kable_styling(latex_options = c("hold_position", "striped", "scale_down"), font_size = 8)
+```
+
+---
+
+```{r mod5}
+formula_alt <- ln_tasp ~
+  s(ln_landratio, bs = "cs", k = 10) +  s(lnsbldsfint, bs = "cs", k = 10) +  arterial +
+  single_family1story + half_duplex1story + half_duplex2story +
+  smallest + small + large + largest +  two_plus_baths + powder_room +
+  good + fair + poor + very_poor_unsound +  qabove_avg + qbelow_avg +
+  s(sresb_yearbuilt, bs = "cs", k = 10) +  crawl + slab +  garage + fireplace +
+  hot_water + elec_baseboard + wall + central_air + ecf + #  s(ecf, bs = "re") +
+  s(months, bs = "cs", k = 10)
+
+mod_alt <- gam(formula_alt, data = df_in, method = "REML", select = TRUE)
+
+#summary(mod_alt)
+
+df_in <- df_in %>%
+  mutate(pre_4 = predict(mod_alt, newdata = df_in), esp4  = exp(pre_4), ratio4 = esp4 / tasp)
+```
+
+```{r mod5m, results='asis'}
+model_metrics_A(mod_alt, "Alternative LN\\_TASP model fit statistics")
+gct5 <- gam_coef_table(mod_base, "Alternative LN\\_TASP model coefficients (95% CI)", format = "latex")
+gct5$kable
+```
+
+```{r mod5ad}
+rrmetrics <- ratio_metrics(df, esp4, saleprice)
+
+knitr::kable(
+  rrmetrics,  format = "latex",  booktabs = TRUE,
+  caption  = "Alternative LN\\_TASP model assessing coefficients" 
+) %>%  kable_styling(latex_options = c("hold_position", "striped", "scale_down"), font_size = 8)
+```
+
+---
+
+```{r mod6, eval=FALSE}
+formula_alt2 <- ln_tasp_re ~
+  s(ln_landratio, bs = "cs", k = 10) +  s(lnsbldsfint, bs = "cs", k = 10) +  arterial +
+  single_family1story + half_duplex1story + half_duplex2story +
+  smallest + small + large + largest +  two_plus_baths + powder_room +
+  good + fair + poor + very_poor_unsound +  qabove_avg + qbelow_avg +
+  s(sresb_yearbuilt, bs = "cs", k = 10) +  crawl + slab +  garage + fireplace +
+  hot_water + elec_baseboard + wall + central_air + ecf
+
+mod_alt2 <- gam(formula_alt2, data = dfa, method = "REML", select = TRUE)
+
+#summary(mod_alt2)
+```
+
+```{r mod6m, results='asis', eval=FALSE}
+model_metrics_A(mod_alt2, "Alternative LN\\_TASP (no sale month) model fit statistics")
+gct6 <- gam_coef_table(mod_alt2, "Alternative LN\\_TASP (no sale month) model coefficients (95% CI)", format = "latex")
+gct6$kable
+```
+
+---
+
+```{r diag, eval=FALSE}
+model_names = c("mod_time", "mod_ln_price_no_ecf", "mod_base", "mod_tasp", "mod_alt", "mod_alt2")
+
+for (nm in model_names) {
+  mod <- get(nm, envir = .GlobalEnv)
+  ct <- tryCatch(broom::tidy(mod), error = function(e) NULL)
+  cat(nm, "-> tidy rows:", if (is.null(ct)) "ERROR" else nrow(ct), "\n")
+}
+```
+
+
+```{r modsave, eval=FALSE}
+cod_nlmod_time_23_25 <- mod_time
+cod_nlmod_ln_price_no_ecf_23_25 <- mod_ln_price_no_ecf
+cod_nlmod_base_23_25 <- mod_base
+cod_nlmod_tasp_23_25 <- mod_tasp
+cod_nlmod_alt_23_25 <- mod_alt
+cod_nlmod_alt2_23_25 <- mod_alt2
+
+save_model_bundle(
+  model_names = c("cod_nlmod_time_23_25", "cod_nlmod_ln_price_no_ecf_23_25", "cod_nlmod_base_23_25",
+                  "cod_nlmod_tasp_23_25", "cod_nlmod_alt_23_25", "cod_nlmod_alt2_23_25"),
+  bundle_path = here("models/codmods", "CODsalesSFapr2023toMarch2025Updated_NLM_18Feb.rds"),
+  manifest_csv_path = here("models/codmods", "CODsalesSFapr2023toMarch2025Updated_NLM_18Feb_manifest.csv")
+)
+```
+
+```{r modelload, eval=FALSE}
+bundle <- readRDS(here("models/codmods", "CODsalesSFapr2023toMarch2025Updated_NLM_11Feb.rds"))
+names(bundle$models)
+```
+
+
+
+
+
+
+
+
+
+
+

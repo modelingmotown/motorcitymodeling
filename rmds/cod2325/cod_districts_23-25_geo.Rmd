@@ -1,0 +1,71 @@
+---
+title: "Linear Regression Models by Council District"
+author: |
+  | Elliot Dean - Program Analyst IV  
+  | Office of the Chief Financial Officer | Office of the Assessor
+  | City of Detroit
+date: "`r sub('^0', '', format(Sys.Date(), '%d %B %Y'))`"
+geometry: margin = 1.5cm
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, error = FALSE, echo = FALSE)
+```
+
+```{r lib_load}
+library(tidyverse)   # data wrangling & ggplot2
+library(janitor)     # functions for examining and cleaning dirty data
+library(kableExtra)  # simple table generator
+library(here)        # Find files within a project
+library(olsrr)       # package for p-value backward elimination
+library(broom)       # summarizes key information about models
+library(rlang)       # functions for Base Types and Core R and 'Tidyverse' Features
+library(car)         # VIF, influence measures helpers
+library(scales)      # provides the internal scaling infrastructure used by ggplot
+```
+
+---
+
+```{r fun}
+# load(file = here("rmds/modfunctions", "modfunctions12.RData"))
+codf <- readRDS(file = here("rmds/modfunctions", "codfunctions.rds"))
+```
+
+```{r data_import}
+load(file = here("data/rdata", "cod_2023-2025geo.RData")) 
+
+res23    <- codf$prep_cod_sales(sales_df, origin_month = as.Date("2023-04-01"))
+df       <- res23$data
+ecfs_col <- res23$ecfs_col
+```
+
+```{r}
+codform  <- readRDS(file = here("rmds", "codformulas.rds"))
+```
+
+```{r datsav}
+dfg <- df
+#save(sales_df, sales_df_in, file = here("data/rdata", "cod_2022-2025geofin.RData"))
+save(dfg, file = here("data/rdata", "cod_2022-2025geos.RData"))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

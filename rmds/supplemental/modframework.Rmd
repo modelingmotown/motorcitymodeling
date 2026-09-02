@@ -1,0 +1,586 @@
+---
+title: "AVM Framework"
+author: |
+  | Elliot Dean - Program Analyst IV  
+  | Office of the Chief Financial Officer | Office of the Assessor
+  | City of Detroit
+date: "`r sub('^0', '', format(Sys.Date(), '%d %B %Y'))`"
+geometry: margin = 1.5cm
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+mainfont: Arial
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, error = FALSE, echo = FALSE)
+```
+
+```{r lib_load}
+library(tidyverse)   # data wrangling & ggplot2
+library(janitor)     # functions for examining and cleaning dirty data
+library(kableExtra)  # simple table generator
+library(here)        # Find files within a project
+library(olsrr)       # package for p-value backward elimination
+library(broom)       # summarizes key information about models
+library(rlang)       # functions for Base Types and Core R and 'Tidyverse' Features
+library(car)         # VIF, influence measures helpers
+library(scales)      # provides the internal scaling infrastructure used by ggplot
+library(fastDummies) # Fast Creation of Dummy (Binary) Columns & Rows from Categorical Variables
+```
+
+```{r fun, results='hide'}
+codf    <- readRDS(file = here("rmds/modfunctions", "codfunctions.rds"))
+codform <- readRDS(file = here("rmds", "codformulas.rds"))
+
+codf_env <- list2env(codf, parent = globalenv())
+for (nm in names(codf)) {environment(codf[[nm]]) <- codf_env}
+list2env(codf, envir = codf_env)
+```
+
+```{r data_import}
+df <- read_csv(here("data/city", "salesSFapr2023toMarch2025Updated.csv")) |>
+  rename_with(tolower)
+
+res23    <- codf$prep_cod_sales(df, origin_month = as.Date("2023-04-01"))
+df       <- res23$data
+ecfs_col <- res23$ecfs_col
+```
+
+# Backward Linear Regression
+
+```{r linreg}
+############################################################
+# 0) Packages
+############################################################
+library(dplyr)
+library(readr)
+library(lubridate)
+library(broom)
+
+############################################################
+# 1) CONFIG — edit these to match your CSV column names
+############################################################
+
+cfg <- list(
+  # ID columns (optional)
+  sale_id_col   = "sale_id",  parcel_col    = "parcel_number",
+  # Market / sale price and date
+  price_col     = "saleprice",     # numeric
+  date_col      = "saledate",      # date or parseable string
+  # Size vars
+  floorarea_col = "sresb_floorarea",  # sqft living area (numeric)
+  lot_col       = "stotalsqft",       # lot sqft (numeric)
+  # Example structural predictors (edit to your set)
+  beds_col      = "bedrooms",  fullbaths_col = "fullbaths",  halfbaths_col = "halfbaths",
+  yearbuilt_col = "yearbuilt",
+  # Example categorical predictors
+  style_col     = "sresb_style",  condition_col = "condition",  arterial_col  = "arterial",
+  # Time adjustment setup
+  # Define a month index "months" relative to a base year-month
+  base_year     = 2022,  base_month    = 1,
+  # 3-bracket breakpoints (example): 1–9, 10–16, 17–24 (cumulative slope basis)
+  b1 = 9,  b2 = 16,
+  # Optional: if you already have fixed time rates you want to apply
+  # If NULL, we'll estimate rates from a time model.
+  rate1_fixed = NULL,  rate2_fixed = NULL,  rate3_fixed = NULL,
+  # Choose the target "end month" for time adjustment
+  # (e.g., last month in sample)
+  end_month_mode = "max"  # "max" or numeric month index
+)
+
+############################################################
+# 2) Import CSV
+############################################################
+
+df_raw <- read_csv("sales.csv", show_col_types = FALSE) %>%
+  janitor::clean_names()  # optional but recommended
+
+############################################################
+# 3) Basic transforms: ln_price, sppsf, ln_sppsf, baths, etc.
+############################################################
+
+df <- df_raw %>%
+  mutate(
+    saleprice      = .data[[cfg$price_col]],    saledate       = .data[[cfg$date_col]],
+    floorarea      = .data[[cfg$floorarea_col]],    lotsqft        = .data[[cfg$lot_col]],
+    bedrooms       = if (cfg$beds_col %in% names(.)) .data[[cfg$beds_col]] else NA_real_,
+    fullbaths      = if (cfg$fullbaths_col %in% names(.)) .data[[cfg$fullbaths_col]] else NA_real_,
+    halfbaths      = if (cfg$halfbaths_col %in% names(.)) .data[[cfg$halfbaths_col]] else NA_real_,
+    yearbuilt      = if (cfg$yearbuilt_col %in% names(.)) .data[[cfg$yearbuilt_col]] else NA_real_,
+    numbaths       = if_else(!is.na(fullbaths) & !is.na(halfbaths),
+                             fullbaths + 0.5 * halfbaths, NA_real_),
+    sppsf          = saleprice / floorarea, ln_price  = log(saleprice),   ln_sppsf = log(sppsf)
+  )
+# parse date robustly
+df <- df %>%
+  mutate(saledate = as.Date(saledate),  sale_year = year(saledate), sale_month = month(saledate))
+
+############################################################
+# 4) Create MONTHS index and 3-piece time bracket variables
+############################################################
+
+# month index from base year-month (1-based)
+df <- df %>% mutate(months = (sale_year - cfg$base_year) * 12 + (sale_month - cfg$base_month) + 1L)
+
+# 3-bracket cumulative slope basis:
+# months_1to9 = min(months, b1)
+# months_10to16 = min(max(months-b1,0), b2-b1)
+# months_17to24 = max(months-b2,0)
+df <- df %>%
+  mutate(
+    months_1to9   = pmin(months, cfg$b1),
+    months_10to16 = pmin(pmax(months - cfg$b1, 0), cfg$b2 - cfg$b1),
+    months_17to24 = pmax(months - cfg$b2, 0)
+  )
+
+############################################################
+# 5) Estimate time rates (RATE1/2/3) if not provided
+############################################################
+
+get_b <- function(mod, nm) {
+  b <- stats::coef(mod)[nm]
+  base::unname(b)
+}
+
+get_time_rates <- function(mod, terms = c("months_1to9","months_10to16","months_17to24")) {
+  b <- vapply(terms, function(t) get_b(mod, t), numeric(1))
+  missing <- terms[is.na(b)]
+  if (length(missing) > 0) stop("Missing time term(s) in model: ", paste(missing, collapse = ", "))
+  rates <- exp(b) - 1
+  names(rates) <- c("rate1","rate2","rate3")
+  list(b = b, rates = rates)
+}
+
+# Fit a "time-only" model to estimate rates (optionally include some basic controls)
+# This is a framework — add controls if you want (size, style, etc.)
+if (is.null(cfg$rate1_fixed) || is.null(cfg$rate2_fixed) || is.null(cfg$rate3_fixed)) {
+  df_time <- df %>%
+    select(ln_price, months_1to9, months_10to16, months_17to24, floorarea, lotsqft) %>%
+    tidyr::drop_na()
+
+  mod_time <- lm(
+    ln_price ~ months_1to9 + months_10to16 + months_17to24 + log(floorarea) + log(lotsqft),
+    data = df_time
+  )
+  tr <- get_time_rates(mod_time)
+  rate1 <- tr$rates["rate1"]
+  rate2 <- tr$rates["rate2"]
+  rate3 <- tr$rates["rate3"]
+} else {
+  rate1 <- cfg$rate1_fixed
+  rate2 <- cfg$rate2_fixed
+  rate3 <- cfg$rate3_fixed
+}
+
+############################################################
+# 6) Compute PRICE_INDEX, END_INDEX, TAF, TASP
+############################################################
+# choose end month index
+end_m <- if (identical(cfg$end_month_mode, "max")) {
+  max(df$months, na.rm = TRUE)} else {as.integer(cfg$end_month_mode)
+}
+# derive end-month bracket exponents
+end_1 <- min(end_m, cfg$b1)
+end_2 <- min(max(end_m - cfg$b1, 0), cfg$b2 - cfg$b1)
+end_3 <- max(end_m - cfg$b2, 0)
+end_index <- (1 + rate1)^end_1 * (1 + rate2)^end_2 * (1 + rate3)^end_3
+
+df <- df %>%
+  mutate(
+    price_index = (1 + rate1)^months_1to9 * (1 + rate2)^months_10to16 *
+                  (1 + rate3)^months_17to24,
+    taf  = end_index / price_index,  tasp = saleprice * taf,
+    ln_tasp = log(tasp),  tasppsf = tasp / floorarea
+  )
+
+############################################################
+# 7) Run a linear regression (example: LN_TASP model)
+############################################################
+# Example predictor set — adjust to your project
+df_model <- df %>%
+  mutate(
+    style = if (cfg$style_col %in% names(.)) factor(.data[[cfg$style_col]]) else NULL,
+    condition = if (cfg$condition_col %in% names(.)) factor(.data[[cfg$condition_col]]) else NULL,
+    arterial = if (cfg$arterial_col %in% names(.)) factor(.data[[cfg$arterial_col]]) else NULL
+  ) %>%
+  select(
+    tasp, ln_tasp, saleprice, floorarea, lotsqft, bedrooms, numbaths, yearbuilt,
+    style, condition, arterial
+  ) %>% tidyr::drop_na()
+
+mod_ln_tasp <- lm(
+  ln_tasp ~ log(floorarea) + log(lotsqft) + bedrooms + numbaths + yearbuilt +
+    style + condition + arterial,  data = df_model
+)
+summary(mod_ln_tasp)
+
+############################################################
+# 8) Back-transform predictions to dollars (ESP)
+############################################################
+
+df_model <- df_model %>%
+  mutate(
+    pred_ln = predict(mod_ln_tasp, newdata = df_model), esp = exp(pred_ln), # predicted TASP dollars
+    ratio   = esp / tasp       # assessed/sale-style ratio (predicted / actual)
+  )
+
+############################################################
+# 9) PRD, COD, PRB + supporting stats
+############################################################
+# COD: 100 * mean(|r - median(r)|) / median(r)
+cod <- function(r) {
+  r <- r[is.finite(r)]
+  med <- median(r, na.rm = TRUE)
+  100 * mean(abs(r - med), na.rm = TRUE) / med
+}
+# PRD: mean ratio / weighted mean ratio
+prd <- function(pred, actual) {
+  ok <- is.finite(pred) & is.finite(actual) & actual > 0
+  p <- pred[ok]; a <- actual[ok]
+  r <- p / a
+  mean_r <- mean(r, na.rm = TRUE)
+  wmean_r <- sum(p, na.rm = TRUE) / sum(a, na.rm = TRUE)
+  mean_r / wmean_r
+}
+
+# PRB: regress % deviation from median ratio on log(value proxy)
+# value proxy often (pred+actual)/2
+prb <- function(pred, actual) {
+  ok <- is.finite(pred) & is.finite(actual) & actual > 0
+  p <- pred[ok]; a <- actual[ok]
+  r <- p / a
+  med <- median(r, na.rm = TRUE)
+  dev_pct <- (r - med) / med * 100
+  vproxy <- (p + a) / 2
+  x <- log(vproxy) - mean(log(vproxy), na.rm = TRUE)
+  coef(lm(dev_pct ~ x))[["x"]] / 100
+}
+
+assess_stats <- df_model %>%
+  summarise(
+    n = n(),  median_ratio = median(ratio, na.rm = TRUE),
+    mean_ratio   = mean(ratio, na.rm = TRUE),
+    wmean_ratio  = sum(esp, na.rm = TRUE) / sum(tasp, na.rm = TRUE),
+    prd = prd(esp, tasp), cod = cod(ratio), prb = prb(esp, tasp)
+  )
+
+assess_stats
+```
+
+---
+
+# Generalized Additive Models (GAM)
+
+```{r gam}
+############################################################
+# 0) Packages
+############################################################
+library(dplyr)
+library(readr)
+library(lubridate)
+library(tidyr)
+library(mgcv)
+
+############################################################
+# 1) CONFIG — edit to match your CSV
+############################################################
+cfg <- list(
+  price_col     = "saleprice",  date_col      = "saledate",  floorarea_col = "sresb_floorarea",
+  lot_col       = "stotalsqft",  beds_col      = "bedrooms",  fullbaths_col = "fullbaths",
+  halfbaths_col = "halfbaths",  yearbuilt_col = "yearbuilt",  style_col     = "sresb_style",
+  condition_col = "condition",  arterial_col  = "arterial",  base_year  = 2022,
+  base_month = 1,  b1 = 9, b2 = 16,             # 3 time brackets: 1–9, 10–16, 17+
+  rate1_fixed = NULL,  rate2_fixed = NULL,  rate3_fixed = NULL,
+  end_month_mode = "max"       # "max" or numeric month index
+)
+############################################################
+# 2) Import
+############################################################
+df_raw <- read_csv("sales.csv", show_col_types = FALSE) %>%  janitor::clean_names()
+############################################################
+# 3) Transforms
+############################################################
+df <- df_raw %>%
+  mutate(
+    saleprice = .data[[cfg$price_col]],  saledate  = as.Date(.data[[cfg$date_col]]),
+    floorarea = .data[[cfg$floorarea_col]],  lotsqft   = .data[[cfg$lot_col]],
+    bedrooms  = if (cfg$beds_col %in% names(.)) .data[[cfg$beds_col]] else NA_real_,
+    fullbaths = if (cfg$fullbaths_col %in% names(.)) .data[[cfg$fullbaths_col]] else NA_real_,
+    halfbaths = if (cfg$halfbaths_col %in% names(.)) .data[[cfg$halfbaths_col]] else NA_real_,
+    yearbuilt = if (cfg$yearbuilt_col %in% names(.)) .data[[cfg$yearbuilt_col]] else NA_real_,
+    numbaths = if_else(!is.na(fullbaths) & !is.na(halfbaths), fullbaths + 0.5 * halfbaths, NA_real_),
+    sppsf    = saleprice / floorarea, ln_price = log(saleprice), ln_sppsf = log(sppsf),
+    sale_year  = year(saledate),  sale_month = month(saledate),
+    months = (sale_year - cfg$base_year) * 12 + (sale_month - cfg$base_month) + 1L,
+    months_1to9   = pmin(months, cfg$b1),
+    months_10to16 = pmin(pmax(months - cfg$b1, 0), cfg$b2 - cfg$b1),
+    months_17to24 = pmax(months - cfg$b2, 0),
+    style     = if (cfg$style_col %in% names(.)) factor(.data[[cfg$style_col]]) else NA,
+    condition = if (cfg$condition_col %in% names(.)) factor(.data[[cfg$condition_col]]) else NA,
+    arterial  = if (cfg$arterial_col %in% names(.)) factor(.data[[cfg$arterial_col]]) else NA
+  )
+############################################################
+# 4) Time rates (RATE1/2/3) — estimate if not fixed
+############################################################
+get_b <- function(mod, nm) {
+  b <- stats::coef(mod)[nm]         # NA if missing
+  base::unname(b)
+}
+
+get_time_rates <- function(mod, terms = c("months_1to9","months_10to16","months_17to24")) {
+  b <- vapply(terms, function(t) get_b(mod, t), numeric(1))
+  missing <- terms[is.na(b)]
+  if (length(missing) > 0) stop("Missing time term(s): ", paste(missing, collapse = ", "))
+  rates <- exp(b) - 1
+  names(rates) <- c("rate1","rate2","rate3")
+  rates
+}
+
+if (is.null(cfg$rate1_fixed) || is.null(cfg$rate2_fixed) || is.null(cfg$rate3_fixed)) {
+  df_time <- df %>%
+    select(ln_price, months_1to9, months_10to16, months_17to24, floorarea, lotsqft) %>% drop_na()
+  # still a simple linear time model to get rates (consistent with your current approach)
+  mod_time <- lm(
+    ln_price ~ months_1to9 + months_10to16 + months_17to24 + log(floorarea) + log(lotsqft),
+    data = df_time
+  )
+  rates <- get_time_rates(mod_time)
+  rate1 <- rates["rate1"]; rate2 <- rates["rate2"]; rate3 <- rates["rate3"]
+} else {
+  rate1 <- cfg$rate1_fixed
+  rate2 <- cfg$rate2_fixed
+  rate3 <- cfg$rate3_fixed
+}
+############################################################
+# 5) Compute price_index, end_index, TAF, TASP
+############################################################
+end_m <- if (identical(cfg$end_month_mode, "max")) max(df$months, na.rm = TRUE) else as.integer(cfg$end_month_mode)
+end_1 <- min(end_m, cfg$b1)
+end_2 <- min(max(end_m - cfg$b1, 0), cfg$b2 - cfg$b1)
+end_3 <- max(end_m - cfg$b2, 0)
+end_index <- (1 + rate1)^end_1 * (1 + rate2)^end_2 * (1 + rate3)^end_3
+
+df <- df %>%
+  mutate(
+    price_index = (1 + rate1)^months_1to9 * (1 + rate2)^months_10to16 * (1 + rate3)^months_17to24,
+    taf   = end_index / price_index,    tasp  = saleprice * taf,
+    ln_tasp = log(tasp),    tasppsf = tasp / floorarea
+  )
+############################################################
+# 6) Non-linear model: GAM for LN_TASP
+############################################################
+df_model <- df %>%
+  select(ln_tasp, tasp, floorarea, lotsqft, bedrooms, numbaths, yearbuilt,
+         style, condition, arterial, months) %>% drop_na()
+# GAM: smooths for continuous vars; factors as parametric
+mod_gam <- mgcv::gam(
+  ln_tasp ~
+    s(log(floorarea), k = 10) + s(log(lotsqft), k = 10) + s(yearbuilt, k = 10) +
+    s(months,         k = 10) +  # optional: lets GAM capture leftover time patterns
+    s(numbaths,       k = 6) +  s(bedrooms, k = 6) + style + condition + arterial,
+  data = df_model,  method = "REML"
+)
+summary(mod_gam)
+mgcv::gam.check(mod_gam)
+############################################################
+# 7) Predict + back-transform to dollars
+############################################################
+df_model <- df_model %>%
+  mutate(
+    pred_ln = predict(mod_gam, newdata = df_model, type = "link"),
+    esp     = exp(pred_ln),     # predicted TASP dollars
+    ratio   = esp / tasp
+  )
+############################################################
+# 8) PRD / COD / PRB
+############################################################
+cod <- function(r) {
+  r <- r[is.finite(r)]
+  med <- median(r, na.rm = TRUE)
+  100 * mean(abs(r - med), na.rm = TRUE) / med
+}
+
+prd <- function(pred, actual) {
+  ok <- is.finite(pred) & is.finite(actual) & actual > 0
+  p <- pred[ok]; a <- actual[ok]
+  r <- p / a
+  mean_r <- mean(r, na.rm = TRUE)
+  wmean_r <- sum(p, na.rm = TRUE) / sum(a, na.rm = TRUE)
+  mean_r / wmean_r
+}
+
+prb <- function(pred, actual) {
+  ok <- is.finite(pred) & is.finite(actual) & actual > 0
+  p <- pred[ok]; a <- actual[ok]
+  r <- p / a
+  med <- median(r, na.rm = TRUE)
+  dev_pct <- (r - med) / med * 100
+  vproxy <- (p + a) / 2
+  x <- log(vproxy) - mean(log(vproxy), na.rm = TRUE)
+  coef(lm(dev_pct ~ x))[["x"]] / 100
+}
+
+assess_stats <- df_model %>%
+  summarise(
+    n = n(),  median_ratio = median(ratio, na.rm = TRUE),
+    mean_ratio   = mean(ratio, na.rm = TRUE),
+    wmean_ratio  = sum(esp, na.rm = TRUE) / sum(tasp, na.rm = TRUE),
+    prd = prd(esp, tasp),  cod = cod(ratio), prb = prb(esp, tasp)
+  )
+
+assess_stats
+```
+
+---
+
+# Gradient Boosting (xgboost)
+
+```{r xgb}
+library(xgboost)
+# Use the same df_model created above but include only predictors you want
+df_xgb <- df %>%
+  select(ln_tasp, tasp, floorarea, lotsqft, bedrooms, numbaths, yearbuilt,
+         style, condition, arterial, months) %>% drop_na()
+# One-hot encode factors
+X <- model.matrix(
+  ln_tasp ~ log(floorarea) + log(lotsqft) + bedrooms + numbaths + yearbuilt + months +
+    style + condition + arterial, data = df_xgb
+)
+y <- df_xgb$ln_tasp
+# Train/test split (quick)
+set.seed(1)
+idx <- sample(seq_len(nrow(X)), size = floor(0.8 * nrow(X)))
+X_tr <- X[idx, , drop = FALSE]; y_tr <- y[idx]
+X_te <- X[-idx, , drop = FALSE]; y_te <- y[-idx]
+dtr <- xgb.DMatrix(data = X_tr, label = y_tr)
+dte <- xgb.DMatrix(data = X_te, label = y_te)
+
+params <- list(
+  objective = "reg:squarederror",  eta = 0.05,  max_depth = 6,
+  subsample = 0.8,  colsample_bytree = 0.8
+)
+
+mod_xgb <- xgb.train(
+  params = params,  data = dtr,  nrounds = 2000,  watchlist = list(train = dtr, test = dte),
+  early_stopping_rounds = 50,  verbose = 0
+)
+# Predict back on full df_xgb (or just test)
+pred_ln <- predict(mod_xgb, newdata = xgb.DMatrix(X))
+df_xgb <- df_xgb %>%  mutate(pred_ln = pred_ln, esp = exp(pred_ln), ratio = esp / tasp)
+
+assess_stats_xgb <- df_xgb %>%
+  summarise(
+    n = n(), median_ratio = median(ratio, na.rm = TRUE),
+    mean_ratio   = mean(ratio, na.rm = TRUE),
+    wmean_ratio  = sum(esp, na.rm = TRUE) / sum(tasp, na.rm = TRUE),
+    prd = prd(esp, tasp), cod = cod(ratio), prb = prb(esp, tasp)
+  )
+
+assess_stats_xgb
+```
+
+---
+
+# Geographically Weighted Regression
+
+```{r gwr_alone}
+library(dplyr)
+library(sf)
+library(GWmodel) # Geographically-Weighted Models
+
+# Example: df has lon/lat (WGS84). If you already have projected x/y, skip to gwr.
+df_sf <- df %>%
+  filter(!is.na(lon), !is.na(lat)) %>%
+  st_as_sf(coords = c("lon","lat"), crs = 4326) %>%
+  st_transform(26917)   # NAD83 / UTM zone 17N (Detroit-ish). Use the CRS you prefer.
+
+# Example model formula on log scale (recommended for price)
+form_gwr <- ln_tasp ~ log(sresb_floorarea) + ln_landratio + ln_base_bldgsize_ratio +
+  arterial + fireplace + ln_garagespaces
+
+# Adaptive bandwidth is often best when sales density varies across the city
+bw <- GWmodel::bw.gwr(
+  form_gwr,
+  data = df_sf,
+  approach = "CV",
+  kernel = "bisquare",
+  adaptive = TRUE
+)
+
+gwr_fit <- GWmodel::gwr.basic(
+  form_gwr,
+  data = df_sf,
+  bw = bw,
+  kernel = "bisquare",
+  adaptive = TRUE
+)
+
+names(gwr_fit$SDF)
+
+sdf <- gwr_fit$SDF
+# If it's sf already, this works; if it's Spatial*, wrap with st_as_sf(sdf)
+if (!inherits(sdf, "sf")) sdf <- sf::st_as_sf(sdf)
+
+# Find likely fitted column
+cand <- intersect(c("yhat", "pred", "predicted"), names(sdf))
+stopifnot(length(cand) == 1)
+pred_col <- cand[1]
+
+df_gwr <- df %>%
+  mutate(row_id = row_number()) %>%
+  left_join(
+    sdf %>%
+      st_drop_geometry() %>%
+      mutate(row_id = row_number()) %>%
+      select(row_id, gwr_pred_ln = all_of(pred_col)),
+    by = "row_id"
+  ) %>%
+  mutate(
+    gwr_pred_tasp = exp(gwr_pred_ln)
+  )
+```
+
+```{r gwr_hybrid}
+# 1) global model (example: lm or gam) predicts ln_tasp
+df_sf$pred_ln_global <- predict(mod_global, newdata = df_sf, type = "link")
+df_sf$resid_ln <- df_sf$ln_tasp - df_sf$pred_ln_global
+
+# 2) GWR on residuals (often just an intercept is enough)
+form_resid <- resid_ln ~ 1
+
+bw_resid <- GWmodel::bw.gwr(form_resid, data = df_sf, approach = "CV",
+                            kernel = "bisquare", adaptive = TRUE)
+
+gwr_resid <- GWmodel::gwr.basic(form_resid, data = df_sf, bw = bw_resid,
+                                kernel = "bisquare", adaptive = TRUE)
+
+sdf_r <- gwr_resid$SDF
+if (!inherits(sdf_r, "sf")) sdf_r <- sf::st_as_sf(sdf_r)
+cand <- intersect(c("yhat", "pred", "predicted"), names(sdf_r))
+pred_col <- cand[1]
+
+df_sf$pred_ln_corrected <- df_sf$pred_ln_global + sdf_r[[pred_col]]
+df_sf$pred_tasp_corrected <- exp(df_sf$pred_ln_corrected)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

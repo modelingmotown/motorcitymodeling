@@ -1,0 +1,56 @@
+---
+title: "City of Detroit 2023 - 2025 Sales Analysis"
+author: |
+  | Elliot Dean  
+  | Office of the Chief Financial Officer | Office of the Assessor
+  | City of Detroit
+date: "`r sub('^0', '', format(Sys.Date(), '%d %B %Y'))`"
+geometry: margin = 1.5cm
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+    template: ./aux/template_1.tex
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, error = FALSE)
+```
+
+## Load Necessary Libraries
+
+```{r lib_load}
+library(tidyverse)   # data wrangling & ggplot2
+library(janitor)     # functions for examining and cleaning dirty data
+library(here)        # Find files within a project
+library(car)         # vif()
+library(lmtest)      # Breusch–Pagan test
+library(ggpubr)      # Automatically print the regression equation for ggplot
+library(spgwr)       # Functions for computing geographically weighted regressions
+library(tidymodels)  # collection of packages for modeling and machine learning
+library(finetune)    # enhances the 'tune' package by providing more specialized methods
+library(xgboost)     # Extreme Gradient Boosting
+library(bundle)      # Serialize Model Objects with a Consistent Interface
+library(psych)       # group statistics, including correlations and factor analysis
+library(kableExtra)  # let R Markdown generate a LaTeX‐based PDF
+library(broom)       # Convert Statistical Objects into Tidy tables
+library(olsrr)       # package for p-value backward elimination
+library(MASS)        # Functions & datasets for Venables & Ripley
+library(rlang)       # Functions for Base Types and Core R and 'Tidyverse' Features
+library(gt)          # Easily create presentation-ready display tables
+```
+
+### Create Custom Functions (Code in Appendix)
+
+```{r load-funs, include = FALSE, ref.label = "functions"}
+```
+
+## Import Data
+Source - salesSFapr2023toMarch2025Updated.csv
+Processed with - cod_23_25_data_preprocessing,R
+
+```{r data_import}
+load(file = here("data/rdata", "cod_23_25_data.RData"))
+```
+
+

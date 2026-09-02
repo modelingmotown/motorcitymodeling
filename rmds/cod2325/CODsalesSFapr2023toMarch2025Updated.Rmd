@@ -1,0 +1,969 @@
+---
+title: "City of Detroit 2023 - 2025 Models"
+author: |
+  | Elliot Dean - Program Analyst IV  
+  | Office of the Chief Financial Officer | Office of the Assessor
+  | City of Detroit
+date: "`r sub('^0', '', format(Sys.Date(), '%d %B %Y'))`"
+geometry: margin = 1.5cm
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+mainfont: Arial
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, error = FALSE, echo = FALSE)
+```
+
+```{r lib_load}
+library(tidyverse)   # data wrangling & ggplot2
+library(janitor)     # functions for examining and cleaning dirty data
+library(kableExtra)
+library(here)        # Find files within a project
+library(olsrr)       # package for p-value backward elimination
+library(broom)
+library(rlang)
+library(car)         # VIF, influence measures helpers
+library(scales)
+library(mgcv)        # Mixed GAM Computation Vehicle
+```
+
+---
+
+```{r fun}
+load(file = here("rmds/modfunctions", "modfunctions10d.RData"))
+```
+
+```{r data_import, eval=FALSE}
+# ---- 1. Load data & normalize names ----
+df <- read_csv(here("data/city", "salesSFapr2023toMarch2025Updated.csv")) |>
+  rename_with(tolower)    # clean_names()
+```
+
+```{r dataload}
+load(file = here("data/rdata", "CODsalesSFapr23Mar25.RData"))
+
+df <- d_f
+```
+
+## Model I
+
+```{r mod1}
+# 21) Core regressions
+# --- Model 1: LN_SPPSF with time splines (SPSS runs this to get time coefficients)
+formula_time <- ln_sppsf ~ arterial +
+  single_family1story + half_duplex1story + half_duplex2story +
+  smallest + small + large + largest +
+  two_plus_baths + powder_room +
+  good + fair + poor + very_poor_unsound +
+  qabove_avg + qbelow_avg +
+  yb_pre_1929 + yb_1946_to_1960 + yb_post_1961 +
+  crawl + slab +
+  ln_garagespaces + fireplace +
+  hot_water + elec_baseboard + wall + central_air +
+  months_1to9 + months_10to16 + months_17to24
+
+mod_time <- backward_p(formula_time, data = df, p_out = 0.10, verbose = TRUE)
+#summary(mod_time)
+
+# --- Automatically pull time coefficients to compute RATEs (optional)
+time_coefs <- coef(mod_time)[c("months_1to9", "months_10to16", "months_17to24")]
+#time_coefs
+
+# SPSS manually copies these: # rate1=-0.009842; rate2=0.022764; rate3=0
+# If you'd rather hard-code like SPSS, set these explicitly.
+rate1 <- unname(ifelse(is.na(time_coefs["months_1to9"]), 0, time_coefs["months_1to9"]))
+rate2 <- unname(ifelse(is.na(time_coefs["months_10to16"]), 0, time_coefs["months_10to16"]))
+rate3 <- unname(ifelse(is.na(time_coefs["months_17to24"]), 0, time_coefs["months_17to24"]))
+
+# PRICE_INDEX and TAF (time adjustment factor)
+df <- df %>%
+  mutate(
+    price_index = (1 + rate1) ^ months_1to9 * (1 + rate2) ^ months_10to16 *
+                  (1 + rate3) ^ months_17to24
+  )
+
+# Choose end_index = price_index at target month (SPSS: "last month")
+# Here: by default, use the max MONTHS observed.
+end_month <- max(df$months, na.rm = TRUE)
+end_index <- df %>%  filter(months == end_month) %>%
+  summarise(end_index = mean(price_index, na.rm = TRUE)) %>%  pull(end_index)
+
+df <- df %>%
+  mutate(
+    taf   = end_index / price_index,    tasp  = saleprice * taf,
+    tasppsf = tasp / sresb_floorarea,   ln_tasp = log(tasp)
+  )
+```
+
+```{r mod1a}
+# 18. Diagnostics & ggplot charts for LN_SPPSF model
+# 1) Get the rows that were actually used by the model
+mf      <- model.frame(mod_time)          # model frame
+row_idx <- as.integer(rownames(mf))           # row numbers in df
+
+# 2) Subset df to those rows and augment
+aug_sppsf <- augment(mod_time, data = df[row_idx, ]) |>
+  mutate(    # back-transform from log if LN_SPPSF = log(SPPSF)
+    PRED_SPPSF = exp(.fitted),    STD_RESID  = .std.resid
+  )
+
+# 3) Histogram of standardized residuals + normal curve
+stats_resid <- aug_sppsf |>
+  summarise(
+    MEAN = mean(STD_RESID, na.rm = TRUE),
+    SD   = sd(STD_RESID,   na.rm = TRUE),
+    N    = sum(!is.na(STD_RESID))
+  )
+
+mu <- stats_resid$MEAN
+sd_ <- stats_resid$SD
+n_  <- stats_resid$N
+binwidth <- 0.25
+
+ggplot(aug_sppsf, aes(x = STD_RESID)) +
+  geom_histogram(binwidth = binwidth, color = "black", fill = "steelblue") +
+  stat_function(
+    fun = function(x) dnorm(x, mean = mu, sd = sd_) * n_ * binwidth,    size = 1
+  ) +
+  labs(
+    title = "Histogram\nDependent Variable: LN_SPPSF",
+    x = "Regression Standardized Residual",    y = "Frequency"
+  ) +
+  annotate(
+    "text",    x = Inf, y = Inf,    hjust = 1.1, vjust = 1.5,
+    label = sprintf("Mean = %.3f\nStd. Dev. = %.3f\nN = %d", mu, sd_, n_)
+  ) +  theme_minimal()
+```
+
+```{r mod1c, results='asis'}
+model_metrics_A(mod_time, "LN\\_SPPSF model fit statistics")
+coef_table(mod_time, "LN\\_SPPSF model coefficients (95% CI)")
+```
+
+```{r mod1p}
+# 4) Residuals vs MONTHS
+ggplot(aug_sppsf, aes(x = months, y = STD_RESID)) +
+  geom_point(alpha = 0.5, size = 1.2) +
+  geom_smooth(method = "loess", se = FALSE, color = "red") +
+  geom_vline(xintercept = c(10, 20), linetype = "dashed") +
+  labs(title = "Residuals for LN_SPPSF Model", x = "Months", y = "Standardized Residual") +
+  theme_minimal()
+```
+
+```{r mod1p1a}
+ggplot(aug_sppsf, aes(x = months, y = PRED_SPPSF)) +
+  geom_point(alpha = 0.5, size = 1.2) +
+  geom_smooth(method = "loess", se = FALSE, color = "blue") +
+  geom_vline(xintercept = c(10, 20), linetype = "dashed") +
+  labs(title = "Months vs Predicted SPPSF - LN_SPPSF Model", x = "Months", y = "SPPSF") +
+  theme_minimal()
+```
+
+```{r mod1p2}
+# If you have multiple rows per MONTHS and want one point per month (like SPSS often does):
+# df_plot <- df |>
+#   dplyr::group_by(MONTHS) |>
+#   dplyr::summarise(TAF = mean(TAF, na.rm = TRUE), .groups = "drop")
+
+df_plot <- df  # use this if you already have one value per month
+
+# Tick label formatter to mimic SPSS: show ".00" at 0, otherwise "5.00", "10.00", ...
+fmt_x <- function(x) ifelse(x == 0, ".00", sprintf("%.2f", x))
+fmt_2 <- function(x) sprintf("%.2f", x)
+
+ggplot(df_plot, aes(x = months, y = price_index)) +
+  geom_point(
+    shape = 21,    size  = 3,    stroke = 0.8,    fill  = "deepskyblue3",    color = "black"
+  ) +
+  scale_x_continuous(
+    breaks = seq(0, 25, 5),    labels = fmt_x,    expand = expansion(mult = c(0.02, 0.02))
+  ) +
+  scale_y_continuous(labels = fmt_2) +
+  coord_cartesian(xlim = c(0, 25)) +   # <-- zooms, does NOT remove rows
+  labs(x = "MONTHS", y = "PRICE_INDEX") +  theme_classic(base_size = 12) +
+  theme(
+    panel.grid.major.y = element_line(color = "grey75", linewidth = 0.6),
+    panel.grid.minor.y = element_blank(),    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    axis.title.x = element_text(size = 14, face = "bold", margin = margin(t = 10)),
+    axis.title.y = element_text(size = 14, face = "bold", margin = margin(r = 10)),
+    axis.text = element_text(size = 10),
+    axis.line = element_line(color = "black", linewidth = 0.8)
+  )
+```
+
+```{r mod1p3}
+ggplot(df_plot, aes(x = months, y = taf)) +
+  geom_point(
+    shape = 21,    size  = 3,    stroke = 0.8,    fill  = "deepskyblue3",    color = "black"
+  ) +
+  scale_x_continuous(
+    limits = c(0, 25),    breaks = seq(0, 25, 5),    labels = fmt_x,
+    expand = expansion(mult = c(0.02, 0.02))
+  ) +
+  scale_y_continuous(labels = fmt_2) +  labs(x = "MONTHS", y = "TAF") +
+  theme_classic(base_size = 12) +
+  theme(
+    panel.grid.major.y = element_line(color = "grey75", linewidth = 0.6),
+    panel.grid.minor.y = element_blank(),    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    axis.title.x = element_text(size = 14, face = "bold", margin = margin(t = 10)),
+    axis.title.y = element_text(size = 14, face = "bold", margin = margin(r = 10)),
+    axis.text = element_text(size = 10),
+    axis.line = element_line(color = "black", linewidth = 0.8)
+  )
+```
+
+---
+
+## Model II
+
+```{r mod2}
+# --- Model 2: LN_PRICE without ECFs (SPSS "TEST MODEL WITHOUT ECFS")
+formula_ln_price_no_ecf <- ln_price ~ ln_landratio + ln_base_bldgsize_ratio +
+  arterial +
+  single_family1story + half_duplex1story + half_duplex2story +
+  smallest + small + large + largest +
+  two_plus_baths + powder_room +
+  good + fair + poor + very_poor_unsound +
+  qabove_avg + qbelow_avg +
+  yb_pre_1929 + yb_1946_to_1960 + yb_post_1961 +
+  crawl + slab +
+  ln_garagespaces + fireplace +
+  hot_water + elec_baseboard + wall + central_air +
+  months_1to9 + months_10to16 + months_17to24
+
+mod_ln_price_no_ecf <- backward_p(formula_ln_price_no_ecf, data = df, p_out = 0.10, verbose = TRUE)
+# summary(mod_ln_price_no_ecf)
+```
+
+```{r mod2a}
+# 18. Diagnostics & ggplot charts for LN_PRICE model
+# 1) Get the rows that were actually used by the model
+mf      <- model.frame(mod_ln_price_no_ecf)          # model frame
+row_idx <- as.integer(rownames(mf))           # row numbers in df
+
+# 2) Subset df to those rows and augment
+aug_price_no_ecf <- augment(mod_ln_price_no_ecf, data = df[row_idx, ]) |>
+  mutate(    # back-transform from log if LN_SPPSF = log(SPPSF)
+    PRED_PRICEN = exp(.fitted),    STD_RESID  = .std.resid
+  )
+
+# 3) Histogram of standardized residuals + normal curve
+stats_resid <- aug_price_no_ecf |>
+  summarise(
+    MEAN = mean(STD_RESID, na.rm = TRUE),    SD   = sd(STD_RESID,   na.rm = TRUE),
+    N    = sum(!is.na(STD_RESID))
+  )
+
+mu <- stats_resid$MEAN
+sd_ <- stats_resid$SD
+n_  <- stats_resid$N
+binwidth <- 0.25
+
+ggplot(aug_price_no_ecf, aes(x = STD_RESID)) +
+  geom_histogram(binwidth = binwidth, color = "black", fill = "steelblue") +
+  stat_function(
+    fun = function(x) dnorm(x, mean = mu, sd = sd_) * n_ * binwidth,    size = 1
+  ) +
+  labs(
+    title = "Histogram\nDependent Variable: LN_PRICE (No ECFs)",
+    x = "Regression Standardized Residual",    y = "Frequency"
+  ) +
+  annotate(
+    "text",    x = Inf, y = Inf,    hjust = 1.1, vjust = 1.5,
+    label = sprintf("Mean = %.3f\nStd. Dev. = %.3f\nN = %d", mu, sd_, n_)
+  ) +  theme_minimal()
+```
+
+```{r modm2, results='asis'}
+model_metrics_A(mod_ln_price_no_ecf, "LN\\_PRICE model fit statistics")
+coef_table(mod_ln_price_no_ecf, "LN\\_PRICE model coefficients (95% CI)")
+```
+
+```{r mod2p}
+# 4) Residuals vs MONTHS
+ggplot(aug_price_no_ecf, aes(x = months, y = STD_RESID)) +
+  geom_point(alpha = 0.5, size = 1.2) +
+  geom_smooth(method = "loess", se = FALSE, color = "red") +
+  geom_vline(xintercept = c(10, 20), linetype = "dashed") +
+  labs(title = "Residuals for LN_PRICE (No ECFs) Model", x = "Months", y = "Standardized Residual") +
+  theme_minimal()
+```
+
+```{r mod2r}
+# ---- INPUT ----
+rows_used <- as.integer(rownames(model.frame(mod_ln_price_no_ecf)))  # which rows lm actually used
+lev_vals  <- hatvalues(mod_ln_price_no_ecf)                          # length = nobs(mod)
+
+lev_df <- df %>%  mutate(lev = NA_real_) %>%  mutate(lev = replace(lev, rows_used, lev_vals))
+
+#lev_df <- df %>%
+#  mutate(lev = hatvalues(mod_ln_price_no_ecf)) %>%   # mod is your lm object
+#  transmute(lev) %>% #  filter(is.finite(lev))
+
+# ---- STATS FOR ANNOTATION ----
+mu <- mean(lev_df$lev)
+sdv <- sd(lev_df$lev)
+n  <- nrow(lev_df)
+
+# ---- HIST BINNING (pick something SPSS-like) ----
+# SPSS often picks a moderate number of bins; 25–35 works well here.
+bins_n <- 30
+
+# We need binwidth to scale the normal curve to "Frequency"
+# density * N * binwidth ≈ counts
+binwidth <- diff(range(lev_df$lev)) / bins_n
+
+# label like SPSS (N = 2,286)
+n_lab <- format(n, big.mark = ",")
+
+ggplot(lev_df, aes(x = lev)) +  # histogram (Frequency)
+  geom_histogram(
+    bins = bins_n,    boundary = 0,    closed = "left",    fill = "deepskyblue2",
+    color = "black",    linewidth = 0.4
+  ) +
+  # Normal curve overlay, scaled to frequency
+  stat_function(
+    fun = function(x) dnorm(x, mean = mu, sd = sdv) * n * binwidth,    color = "black",
+    linewidth = 1.3
+  ) +
+  labs(
+    title = "Histogram",    subtitle = "Dependent Variable: LN_PRICE",
+    x = "Regression Leverage",    y = "Frequency"
+  ) +
+  # annotation top-right
+  annotate(
+    "text",    x = Inf, y = Inf,    hjust = 1.05, vjust = 1.2,
+    label = paste0(
+      "Mean = ", sprintf("%.2f", mu), "\n",
+      "Std. Dev. = ", sprintf("%.3f", sdv), "\n",
+      "N = ", n_lab
+    ),    size = 4
+  ) +
+  # SPSS-ish styling: classic axes + horizontal grid lines
+  theme_classic(base_size = 12) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5, face = "bold"),
+    axis.title.x = element_text(size = 14, face = "bold", margin = margin(t = 10)),
+    axis.title.y = element_text(size = 14, face = "bold", margin = margin(r = 10)),
+    panel.grid.major.y = element_line(color = "grey70", linewidth = 0.6),
+    panel.grid.minor.y = element_blank(),    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()
+  )
+```
+
+```{r mod2r1}
+pp_plot_resid(mod_ln_price_no_ecf, dep_label = "LN_PRICE")
+```
+
+```{r mod2r2}
+plot_stdresid_vs_stdpred(mod_ln_price_no_ecf, dep_label = "LN_PRICE")
+```
+
+```{r mod2r3}
+plot_cook_vs_rstudent(mod_ln_price_no_ecf, dep_label = "LN_PRICE")
+```
+
+```{r mod2r4}
+plot_lev_vs_rstudent(mod_ln_price_no_ecf, dep_label = "LN_PRICE")
+```
+
+---
+
+## Model III
+
+```{r mod3}
+# --- Model 3: BASE MODEL with ECFs (SPSS "BASE MODEL", dependent LN_PRICE)
+# build RHS terms as character vector, then turn into a formula
+rhs <- c(
+  "ln_landratio", "ln_base_bldgsize_ratio",
+  "arterial",
+  "single_family1story", "half_duplex1story", "half_duplex2story",
+  "smallest", "small", "large", "largest",
+  "two_plus_baths", "powder_room",
+  "good", "fair", "poor", "very_poor_unsound",
+  "qabove_avg", "qbelow_avg",
+  "yb_pre_1929", "yb_1946_to_1960", "yb_post_1961",
+  "crawl", "slab",
+  "ln_garagespaces", "fireplace",
+  "hot_water", "elec_baseboard", "wall", "central_air",
+  ecfs_col,  # <-- splices *all* secf_ dummy columns in correctly
+  "months_1to9", "months_10to16", "months_17to24"
+)
+
+formula_base <- reformulate(rhs, response = "ln_price")
+
+mod_base <- backward_p(formula_base, data = df, p_out = 0.10, verbose = TRUE)
+summary(mod_base)
+
+# Save predictions and influence measures similar to SPSS /SAVE=
+df <- df %>%
+  mutate(pre_1 = predict(mod_base, newdata = df), esp1  = exp(pre_1), ratio1 = esp1 / saleprice)
+
+# Assessing metrics output
+rrmetrics <- ratio_metrics(df, esp1, saleprice)
+
+knitr::kable(
+  rrmetrics,  format   = "latex",  booktabs = TRUE,
+  caption  = "LN\\_PRICE model (base) assessing coefficients"   # <-- no \\_
+  # escape = TRUE is the default; keep it that way
+) %>%  kable_styling(latex_options = c("hold_position", "striped"), font_size = 8)
+
+# Ratio stats like SPSS RATIO STATS ... BY ...
+ratio_ecf   <- ratio_by(df, esp1, saleprice, ecf)
+ratio_style <- ratio_by(df, esp1, saleprice, sresb_style)
+ratio_cond  <- ratio_by(df, esp1, saleprice, scond)
+ratio_size  <- ratio_by(df, esp1, saleprice, size)
+ratio_era   <- ratio_by(df, esp1, saleprice, erabuilt)
+ratio_fire  <- ratio_by(df, esp1, saleprice, fireplace)
+ratio_priceclass <- ratio_by(df, esp1, saleprice, priceclass)
+
+# Within bands (10/20/50)
+df <- df %>%
+  mutate(
+    within10_1 = if_else(ratio1 >= 0.9 & ratio1 <= 1.1, 1L, 0L),
+    within20_1 = if_else(ratio1 >= 0.8 & ratio1 <= 1.2, 1L, 0L),
+    within50_1 = if_else(ratio1 >= 0.5 & ratio1 <= 1.5, 1L, 0L)
+  )
+
+# 22) Outlier / influence removal (SPSS: COOK > 4/N, |SDRESID| > 2)
+N_total <- nrow(df)
+infl <- influence.measures(mod_base)
+cook <- cooks.distance(mod_base)
+stud <- rstudent(mod_base)
+
+rows_used <- as.integer(rownames(model.frame(mod_base)))  # row numbers from the data used in lm()
+
+df <- df %>%
+  mutate(cook_1 = NA_real_,    stud_1  = NA_real_) |> 
+  mutate(
+    cook_1 = replace(cook_1, rows_used, cook),    stud_1 = replace(stud_1, rows_used, stud),
+    in_inlier = if_else(cook_1 <= (4 / N_total) & abs(stud_1) <= 2, 1L, 0L)
+    )
+
+df_in <- df %>% filter(in_inlier == 1)
+
+mod_base_inliers <- backward_p(formula_base, data = df_in, p_out = 0.10, verbose = TRUE)
+#summary(mod_base_inliers)
+
+df_in <- df_in %>%
+  mutate(
+    pre_2 = predict(mod_base_inliers, newdata = df_in),
+    esp2  = exp(pre_2),    ratio2 = esp2 / saleprice,
+    within10_2 = if_else(ratio2 >= 0.9 & ratio2 <= 1.1, 1L, 0L),
+    within20_2 = if_else(ratio2 >= 0.8 & ratio2 <= 1.2, 1L, 0L),
+    within50_2 = if_else(ratio2 >= 0.5 & ratio2 <= 1.5, 1L, 0L)
+  )
+
+# 23) Recalibrate time adjustments (SPSS shows an example with new RATEs)
+# You can either:
+#  - re-extract from a model that still has time splines, or  - set them manually.
+# Here we demonstrate manual override:
+
+time_coefs2 <- coef(mod_base)[c("months_1to9", "months_10to16", "months_17to24")]
+#time_coefs2
+
+# SPSS manually copies these:
+# RATE1=-0.009842; RATE2=0.022764; RATE3=0
+# If you'd rather hard-code like SPSS, set these explicitly.
+RATE1_re <- unname(ifelse(is.na(time_coefs2["months_1to9"]), 0, time_coefs2["months_1to9"]))
+RATE2_re <- unname(ifelse(is.na(time_coefs2["months_10to16"]), 0, time_coefs2["months_10to16"]))
+RATE3_re <- unname(ifelse(is.na(time_coefs2["months_17to24"]), 0, time_coefs2["months_17to24"]))
+
+df_in <- df_in %>%
+  mutate(
+    price_index_re = (1 + RATE1_re) ^ months_1to9 * (1 + RATE2_re) ^ months_10to16 *
+                     (1 + RATE3_re) ^ months_17to24
+  )
+
+end_month_in <- max(df_in$months, na.rm = TRUE)
+END_INDEX_re <- df_in %>%
+  filter(months == end_month_in) %>%
+  summarise(end_index = mean(price_index_re, na.rm = TRUE)) %>%  pull(end_index)
+
+df_in <- df_in %>%
+  mutate(
+    taf_re  = END_INDEX_re / price_index_re,
+    tasp_re = saleprice * taf_re,    ln_tasp_re = log(tasp_re)
+  )
+
+df_in1 <- df_in %>% select(saleid, pre_2, esp2, ratio2, within10_2, within20_2, within50_2,
+                             price_index_re, taf_re, tasp_re, ln_tasp_re)
+
+dfa <- df %>% left_join(df_in1, by = "saleid")
+```
+
+```{r mod3a}
+# 18. Diagnostics & ggplot charts for LN_PRICE + ECFs model
+
+# 1) Get the rows that were actually used by the model
+mf      <- model.frame(mod_base_inliers)          # model frame
+row_idx <- as.integer(rownames(mf))           # row numbers in df
+
+# 2) Subset df to those rows and augment
+aug_sppsf <- augment(mod_base_inliers, data = df[row_idx, ]) |>
+  mutate(
+    # back-transform from log if LN_SPPSF = log(SPPSF)
+    PRED_SPPSF = exp(.fitted),    STD_RESID  = .std.resid
+  )
+
+# 3) Histogram of standardized residuals + normal curve
+stats_resid <- aug_sppsf |>
+  summarise(
+    MEAN = mean(STD_RESID, na.rm = TRUE),    SD   = sd(STD_RESID,   na.rm = TRUE),
+    N    = sum(!is.na(STD_RESID))
+  )
+
+mu <- stats_resid$MEAN
+sd_ <- stats_resid$SD
+n_  <- stats_resid$N
+binwidth <- 0.25
+
+ggplot(aug_sppsf, aes(x = STD_RESID)) +
+  geom_histogram(binwidth = binwidth, color = "black", fill = "steelblue") +
+  stat_function(
+    fun = function(x) dnorm(x, mean = mu, sd = sd_) * n_ * binwidth,
+    size = 1
+  ) +
+  labs(
+    title = "Histogram\nDependent Variable: LN_PRICE (+ECFs)",
+    x = "Regression Standardized Residual",    y = "Frequency"
+  ) +
+  annotate(
+    "text",    x = Inf, y = Inf,    hjust = 1.1, vjust = 1.5,
+    label = sprintf("Mean = %.3f\nStd. Dev. = %.3f\nN = %d", mu, sd_, n_)
+  ) +  theme_minimal()
+```
+
+```{r modm3, results='asis'}
+model_metrics_A(mod_base, "LN\\_PRICE (base) model fit statistics")
+coef_table(mod_base, "LN\\_PRICE (+ECFs) model coefficients (95% CI)")
+```
+
+```{r mod3p}
+# 4) Residuals vs MONTHS
+ggplot(aug_sppsf, aes(x = months, y = STD_RESID)) +
+  geom_point(alpha = 0.5, size = 1.2) +
+  geom_smooth(method = "loess", se = FALSE, color = "red") +
+  geom_vline(xintercept = c(10, 20), linetype = "dashed") +
+  labs(title = "Residuals for LN_PRICE (+ECFs) Model", x = "Months", y = "Standardized Residual") +
+  theme_minimal()
+```
+
+```{r mod3re}
+df_plot <- df %>%  filter(is.finite(esp1), is.finite(ratio1))
+
+ggplot(df_plot, aes(x = esp1, y = ratio1)) +
+  geom_point(
+    shape = 21, size = 2.6, stroke = 0.6,    fill = "deepskyblue2", color = "black"
+  ) +
+  scale_x_continuous(
+    labels = label_number(accuracy = 0.01, big.mark = "", decimal.mark = ".")
+    # If you want commas instead, use: label_number(big.mark = ",", accuracy = 1)
+  ) +
+  scale_y_continuous(
+    limits = c(0, NA),                      # keep y >= 0 like the SPSS plot
+    breaks = seq(0, 5, 1),    labels = function(x) ifelse(x == 0, ".00", sprintf("%.2f", x))
+  ) +
+  labs(x = "ESP1", y = "RATIO1") +  theme_classic(base_size = 12) +
+  theme(
+    # horizontal gridlines only, SPSS-like
+    panel.grid.major.y = element_line(color = "grey70", linewidth = 0.6),
+    panel.grid.minor.y = element_blank(),    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    # bold axis titles
+    axis.title.x = element_text(size = 14, face = "bold", margin = margin(t = 10)),
+    axis.title.y = element_text(size = 14, face = "bold", margin = margin(r = 10)),
+    axis.text = element_text(size = 10),
+    # keep axes lines prominent
+    axis.line = element_line(color = "black", linewidth = 0.8)
+  )
+```
+
+```{r mod3rf}
+# ---- INPUT ----
+dat <- df %>%
+  transmute(ratio1 = ratio1) %>%   # keep only the column
+  filter(is.finite(ratio1))
+
+# ---- STATS FOR ANNOTATION ----
+mu  <- mean(dat$ratio1)
+sdv <- sd(dat$ratio1)
+n   <- nrow(dat)
+
+n_lab <- format(n, big.mark = ",")
+
+# ---- BINNING (adjust bins to match SPSS look) ----
+bins_n <- 30  # try 25–40 if you want closer bar widths
+
+ggplot(dat, aes(x = ratio1)) +
+  geom_histogram(
+    bins = bins_n,  boundary = 0,  closed = "left",    fill = "deepskyblue2",
+    color = "black",    linewidth = 0.4
+  ) +
+  labs(x = "RATIO1", y = "Frequency") +
+  annotate(
+    "text",
+    x = Inf, y = Inf,    hjust = 1.05, vjust = 1.2,
+    label = paste0(
+      "Mean = ", sprintf("%.2f", mu), "\n",
+      "Std. Dev. = ", sprintf("%.3f", sdv), "\n",
+      "N = ", n_lab
+    ),    size = 4
+  ) +
+  theme_classic(base_size = 12) +
+  theme(
+    axis.title.x = element_text(size = 14, face = "bold", margin = margin(t = 10)),
+    axis.title.y = element_text(size = 14, face = "bold", margin = margin(r = 10)),
+    panel.grid.major.y = element_line(color = "grey70", linewidth = 0.6),
+    panel.grid.minor.y = element_blank(),    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    axis.line = element_line(color = "black", linewidth = 0.8)
+  ) +
+  # optional: match the visible range in your screenshot
+  coord_cartesian(xlim = c(0, 5.2))
+```
+
+---
+
+```{r mod3re2}
+df_plot <- df_in %>%  filter(is.finite(esp2), is.finite(ratio2))
+
+ggplot(df_plot, aes(x = esp2, y = ratio2)) +
+  geom_point(
+    shape = 21, size = 2.6, stroke = 0.6,    fill = "deepskyblue2", color = "black"
+  ) +
+  scale_x_continuous(
+    labels = label_number(accuracy = 0.01, big.mark = "", decimal.mark = ".")
+    # If you want commas instead, use: label_number(big.mark = ",", accuracy = 1)
+  ) +
+  scale_y_continuous(
+    limits = c(0, NA),    breaks = seq(0, 5, 1),
+    labels = function(x) ifelse(x == 0, ".00", sprintf("%.2f", x))
+  ) +
+  labs(x = "ESP2", y = "RATIO2") +  theme_classic(base_size = 12) +
+  theme(
+    # horizontal gridlines only, SPSS-like
+    panel.grid.major.y = element_line(color = "grey70", linewidth = 0.6),
+    panel.grid.minor.y = element_blank(),    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    # bold axis titles
+    axis.title.x = element_text(size = 14, face = "bold", margin = margin(t = 10)),
+    axis.title.y = element_text(size = 14, face = "bold", margin = margin(r = 10)),
+    axis.text = element_text(size = 10),
+    # keep axes lines prominent
+    axis.line = element_line(color = "black", linewidth = 0.8)
+  )
+```
+
+```{r mod3rf2}
+# ---- INPUT ----
+dat <- df_in %>%
+  transmute(ratio2 = ratio2) %>%   # keep only the column
+  filter(is.finite(ratio2))
+
+# ---- STATS FOR ANNOTATION ----
+mu  <- mean(dat$ratio2)
+sdv <- sd(dat$ratio2)
+n   <- nrow(dat)
+
+n_lab <- format(n, big.mark = ",")
+
+# ---- BINNING (adjust bins to match SPSS look) ----
+bins_n <- 30  # try 25–40 if you want closer bar widths
+
+ggplot(dat, aes(x = ratio2)) +
+  geom_histogram(
+    bins = bins_n,    boundary = 0,    closed = "left",    fill = "deepskyblue2",
+    color = "black",    linewidth = 0.4
+  ) +
+  labs(x = "RATIO2", y = "Frequency") +
+  annotate(
+    "text",
+    x = Inf, y = Inf,    hjust = 1.05, vjust = 1.2,
+    label = paste0(
+      "Mean = ", sprintf("%.2f", mu), "\n",
+      "Std. Dev. = ", sprintf("%.3f", sdv), "\n",
+      "N = ", n_lab
+    ),    size = 4
+  ) +
+  theme_classic(base_size = 12) +
+  theme(
+    axis.title.x = element_text(size = 14, face = "bold", margin = margin(t = 10)),
+    axis.title.y = element_text(size = 14, face = "bold", margin = margin(r = 10)),
+    panel.grid.major.y = element_line(color = "grey70", linewidth = 0.6),
+    panel.grid.minor.y = element_blank(),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    axis.line = element_line(color = "black", linewidth = 0.8)
+  ) +  coord_cartesian(xlim = c(0, 5.2))
+```
+
+---
+
+## Model IV
+
+```{r mod4}
+# 24) Model with recalibrated time adjustments (dependent LN_TASP, remove time vars)
+# SPSS: LN_TASP with ECFs, no months splines
+rhs2 <- c(
+  "ln_landratio", "ln_base_bldgsize_ratio",
+  "arterial",
+  "single_family1story", "half_duplex1story", "half_duplex2story",
+  "smallest", "small", "large", "largest",
+  "two_plus_baths", "powder_room",
+  "good", "fair", "poor", "very_poor_unsound",
+  "qabove_avg", "qbelow_avg",
+  "yb_pre_1929", "yb_1946_to_1960", "yb_post_1961",
+  "crawl", "slab",
+  "ln_garagespaces", "fireplace",
+  "hot_water", "elec_baseboard", "wall", "central_air",
+  ecfs_col
+)
+
+formula_ln_tasp <- reformulate(rhs2, response = "ln_tasp_re")
+
+mod_tasp <- backward_p(formula_ln_tasp, data = df_in, p_out = 0.10, verbose = TRUE)
+#summary(mod_tasp)
+
+df_in <- df_in %>%
+  mutate(
+    pre_3 = predict(mod_tasp, newdata = df_in), esp3  = exp(pre_3), ratio3 = esp3 / tasp_re
+  )
+
+rrmetrics <- ratio_metrics(df_in, esp3, saleprice)
+
+knitr::kable(
+  rrmetrics,  format   = "latex",  booktabs = TRUE,
+  caption  = "LN\\_TASP model assessing coefficients" 
+) %>%  kable_styling(latex_options = c("hold_position", "striped"), font_size = 8)
+
+# 25) Alternative model (SPSS: LN_TASP with LN_LANDRATIO + LNSBLDSFINT + GARAGE + FIREPLACE, etc.)
+rhs_alt <- c(
+  "ln_landratio", "lnsbldsfint",
+  "arterial",
+  "single_family1story", "half_duplex1story", "half_duplex2story",
+  "smallest", "small", "large", "largest",
+  "two_plus_baths", "powder_room",
+  "good", "fair", "poor", "very_poor_unsound",
+  "qabove_avg", "qbelow_avg",
+  "yb_pre_1929", "yb_1946_to_1960", "yb_post_1961",
+  "crawl", "slab",
+  "garage", "fireplace",
+  "hot_water", "elec_baseboard", "wall", "central_air",
+  ecfs_col
+)
+
+formula_alt <- reformulate(rhs_alt, response = "ln_tasp_re")
+
+mod_alt <- backward_p(formula_alt, data = df_in, p_out = 0.10, verbose = TRUE)
+#summary(mod_alt)
+
+df_in <- df_in %>%
+  mutate(
+    pre_4 = predict(mod_alt, newdata = df_in), esp4  = exp(pre_4), ratio4 = esp4 / tasp_re
+  )
+
+rrmetrics <- ratio_metrics(df_in, esp4, saleprice)
+
+knitr::kable(
+  rrmetrics,  format   = "latex",  booktabs = TRUE,
+  caption  = "Alternative LN\\_TASP model assessing coefficients" 
+) %>%  kable_styling(latex_options = c("hold_position", "striped"), font_size = 8)
+
+df_in2 <- df_in %>% select(saleid, pre_3, esp3, ratio3, pre_4, esp4, ratio4)
+
+dfa <- dfa %>% left_join(df_in2, by = "saleid")
+```
+
+```{r modm4, results='asis'}
+model_metrics_A(mod_tasp, "LN\\_TASP model fit statistics")
+coef_table(mod_tasp, "LN\\_TASP model coefficients (95% CI)")
+```
+
+```{r modm4a, results='asis'}
+model_metrics_A(mod_alt, "Alternative LN\\_TASP model fit statistics")
+coef_table(mod_alt, "Alternative LN\\_TASP model coefficients (95% CI)")
+```
+
+```{r tplot}
+ggplot(df_in, aes(x = tasp_re, y = esp3, colour = sresb_style)) +
+  # points (open circles)
+  geom_point(shape = 21, stroke = 0.8, fill = NA, alpha = 0.9, size = 2) +
+  # 45° line
+  geom_abline(intercept = 0, slope = 1) +
+  # same scaling on both axes
+  coord_equal() +
+  # axis labels & legend title
+  labs(x = "TASP",    y = "ESP3",    colour = "SRESB_STYLE") +
+  # optional: colors roughly similar to your SPSS plot
+  scale_colour_manual(
+    values = c(
+      "1/2 DUPLEX"    = "#66CCFF",  # light blue
+      "SINGLE FAMILY" = "#CC3366"   # pink/magenta
+    )
+  ) +
+  # theme similar to SPSS default
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.major = element_line(color = "grey80", linewidth = 0.3),
+    panel.grid.minor = element_blank(),    legend.position  = "right",
+    legend.title     = element_text(face = "bold")
+  )
+```
+
+```{r datsav, eval=FALSE}
+dfc <- df
+save(dfc, dfa, file = here("data/rdata", "CODsalesSFapr2023Mar2025.RData"))
+```
+
+```{r modsss, eval=FALSE}
+cod_mod_time_23_25 <- mod_time
+cod_mod_ln_price_no_ecf_23_25 <- mod_ln_price_no_ecf
+cod_mod_base_23_25 <- mod_base
+cod_mod_base_inliers_23_25 <- mod_base_inliers
+cod_mod_tasp_23_25 <- mod_tasp
+cod_mod_alt_23_25 <- mod_alt
+
+save_model_bundle(
+  model_names = c("cod_mod_time_23_25", "cod_mod_ln_price_no_ecf_23_25", "cod_mod_base_23_25",
+                  "cod_mod_base_inliers_23_25", "cod_mod_tasp_23_25", "cod_mod_alt_23_25"),
+  bundle_path = here("models/codmods", "CODsalesSFapr2023toMarch2025Updated_18Feb.rds"),
+  manifest_csv_path = here("models/codmods", "CODsalesSFapr2023toMarch2025Updated_18Feb_manifest.csv")
+)
+```
+
+---
+
+```{r dataload2, eval=FALSE}
+load(file = here("data/rdata", "CODsalesSFapr2023Mar2025.RData"))
+```
+
+```{r modelload, eval=FALSE}
+bundle <- readRDS(here("models/codmods", "CODsalesSFapr2023toMarch2025Updated_18Feb.rds"))
+names(bundle$models)
+
+bundlen <- readRDS(here("models/codmods", "CODsalesSFapr2023toMarch2025Updated_NLM_18Feb.rds"))
+names(bundlen$models)
+```
+
+```{r getdata_predictbase_lm, eval=FALSE}
+mod_base <- bundle$models$cod_mod_base_23_25
+# cdf2 <- cdf |> dplyr::mutate(ln_garagespaces = log1p(garagespaces))
+nd <- newdata_from_sale2(data = dfa, model = mod_base, sale_col = "saleid", sale_id = 4782482)
+
+nd$ln_garagespaces[!is.finite(nd$ln_garagespaces)] <- 0
+
+mu <- predict(mod_base, newdata = nd)  # ln scale
+pred_median <- backtransform_log_preds(mod_base, mu, "median")
+pred_mean   <- backtransform_log_preds(mod_base, mu, "mean_smear")
+
+pred_median
+pred_mean
+
+#pred <- predict(mod_base, newdata = nd)
+#pred
+```
+
+```{r getdata_predictbase_nlm, eval=FALSE}
+mod_basen <- bundlen$models$cod_nlmod_base_23_25
+# cdf2 <- cdf |> dplyr::mutate(ln_garagespaces = log1p(garagespaces))
+nd <- newdata_from_sale2(data = dfa, model = mod_basen, sale_col = "saleid", sale_id = 4782482)
+
+nd$ln_garagespaces[!is.finite(nd$ln_garagespaces)] <- 0
+
+mu <- predict(mod_basen, newdata = nd)  # ln scale
+pred_median <- backtransform_log_preds(mod_basen, mu, "median")
+pred_mean   <- backtransform_log_preds(mod_basen, mu, "mean_smear")
+
+pred_median
+pred_mean
+```
+
+```{r modsdiag1, eval=FALSE}
+resp <- as.character(formula(mod_basen))[2]
+req  <- setdiff(names(model.frame(mod_basen)), resp)
+
+setdiff(req, names(cdf))
+
+names(bundlen$data) 
+grep("^ecf", names(cdf), value = TRUE)
+
+```
+
+
+```{r getdata_predicttasp_lm, eval=FALSE}
+mod_tasp <- bundle$models$cod_mod_tasp_23_25
+# cdf2 <- cdf |> dplyr::mutate(ln_garagespaces = log1p(garagespaces))
+nd <- newdata_from_sale2(data = cdf, model = mod_tasp, sale_col = "saleid", sale_id = 4782482)
+
+nd$ln_garagespaces[!is.finite(nd$ln_garagespaces)] <- 0
+
+mu <- predict(mod_tasp, newdata = nd)  # ln scale
+pred_median <- backtransform_log_preds(mod_tasp, mu, "median")
+pred_mean   <- backtransform_log_preds(mod_tasp, mu, "mean_smear")
+
+pred_median
+pred_mean
+```
+
+```{r, eval=FALSE}
+mod_tasp <- bundle$models$cod_mod_tasp_23_25
+ndt <- newdata_from_sale2(data = df, model = mod_tasp, sale_id = 4782482, sale_col = "saleid")
+predt <- predict(mod_tasp, newdata = ndt)
+predt
+```
+
+
+```{r, eval=FALSE}
+diagnose_predict_na <- function(model, newdata) {
+  Terms <- delete.response(terms(model))
+
+  mf <- model.frame(
+    Terms,
+    data = newdata,
+    xlev = model$xlevels,
+    na.action = na.pass
+  )
+
+  bad <- vapply(mf, function(x) any(is.na(x) | is.nan(x) | is.infinite(x)), logical(1))
+  bad_vars <- names(bad)[bad]
+
+  list(
+    bad_vars = bad_vars,
+    bad_values = mf[ , bad_vars, drop = FALSE],
+    model_vars = names(mf)
+  )
+}
+
+diag <- diagnose_predict_na(mod_base, nd)
+diag$bad_vars
+diag$bad_values
+
+```
+
+
+```{r, eval=FALSE}
+bundle$models$cod_mod_base_23_25$call
+bundlen$models$cod_nlmod_base_23_25$call
+
+```
+
+
+
+```{r, eval=FALSE}
+modt2 <- backward_lm(formula_time, data = df_prepped, p_out = 0.10, verbose = TRUE)
+```
+
+
+
+
+
+
+
+

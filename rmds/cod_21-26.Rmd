@@ -1,0 +1,154 @@
+---
+title: "City of Detroit 2021 - 2026 Sales Workflow"
+author: |
+  | Elliot Dean - Program Analyst IV  
+  | Office of the Chief Financial Officer | Office of the Assessor
+  | City of Detroit
+date: "`r sub('^0', '', format(Sys.Date(), '%d %B %Y'))`"
+geometry: margin = 1.5cm
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+mainfont: Arial
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, error = FALSE, echo = FALSE)
+```
+
+```{r lib_load}
+library(tidyverse)    # data wrangling & ggplot2
+library(janitor)      # functions for examining and cleaning dirty data
+library(readxl)       # for reading Excel
+library(kableExtra)   # simple table generator
+library(here)         # Find files within a project
+library(olsrr)        # package for p-value backward elimination
+library(broom)        # summarizes key information about models
+library(rlang)        # functions for Base Types and Core R and 'Tidyverse' Features
+library(car)          # VIF, influence measures helpers
+library(scales)       # provides the internal scaling infrastructure used by ggplot
+library(mgcv)         # Mixed GAM Computation Vehicle
+library(fastDummies)  # Fast Creation of Dummy (Binary) Columns & Rows from Categorical Variables
+library(diffdf)       # tools for working with data frame difference
+library(sf)           # used for handling and analyzing spatial data
+library(httr2)        # make HTTP requests and handle responses
+library(jsonlite)     # provides functions for parsing and generating JSON data
+library(arcgislayers) # connect to ArcGIS Data Services
+library(geosphere)    # Spherical trigonometry for geographic applications
+library(osrm)         # Shortest Paths and Travel Time from OpenStreetMap
+library(tigris)       # Load Census TIGER/Line Shapefiles
+library(osmextract)   # Download and Import Open Street Map Data Extracts
+```
+
+---
+
+## Introduction
+
+This document contains the procedures implemented to import sales data into R, organize and clean
+the dataset, create predictors for model training (including geospatial attributes), and save the
+augmented dataset as an .RData file.
+
+```{r fun}
+load(file = here("rmds/modfunctions", "modfunctions13.RData"))
+
+codf    <- readRDS(file = here("rmds/modfunctions", "codfunctions.rds"))
+codform <- readRDS(file = here("rmds", "codformulas.rds"))
+
+codf_env <- list2env(codf, parent = globalenv())
+for (nm in names(codf)) {environment(codf[[nm]]) <- codf_env}
+list2env(codf, envir = codf_env)
+source(here("rmds/cod2325/districtruns/d2325f", "spss_cod_district-7_23-25f.R"), local = knitr::knit_global())
+```
+
+Functions Used: modfunctions_notes.R + modelfunctions.R
+
+## Data Import
+
+```{r data_import}
+# ---- 1. Load data & normalize names ----
+df <- read_csv(here("data/city", "SF-Sales-Apr2021-Mar2026-08182026.csv")) |>
+  rename_with(tolower)    # clean_names()
+```
+
+## Prepare Dataset
+
+```{r dataprep}
+cod5     <- prep_cod_sales(df, ecf_col = "ecftbl", origin_month = as.Date("2021-04-01"))
+df       <- cod5$data
+ecfs_col <- cod5$ecfs_col
+```
+
+## Retrieve Parcel Coordinates
+
+```{r addcoords}
+df <- add_detroit_parcel_coords(
+  df, "parcelno", x_col = "x_coord", y_col = "y_coord", batch_size = 100, quiet = FALSE
+)
+```
+
+## Geospatial Attributes
+
+
+
+### Distance to Downtown
+
+```{r dist1}
+df <- add_linear_distance(
+  df = df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -83.0466,
+  target_lat = 42.3317,  out_m_col = "dist_guardian_m",
+  out_km_col = "dist_guardian_km", out_mi_col = "dist_guardian_mi"
+)
+
+df <- add_drive_distance_graphhopper(
+  df = df,  lon_col = "x_coord",  lat_col = "y_coord",  target_lon = -83.0466,
+  target_lat = 42.3317,  dist_col = "drive_guardian_km",  time_col = "drive_guardian_min",
+  profile = "car", server_url = "http://localhost:8989"
+)
+
+df <- df %>%
+  mutate(
+    dist_guardian_log = log1p(dist_guardian_mi), drive_guardian_log = log1p(drive_guardian_min),
+    near_downtown_1mi = as.integer(dist_guardian_mi <= 1),
+    near_downtown_5mi = as.integer(dist_guardian_mi <= 5),
+    near_downtown_10mi = as.integer(dist_guardian_mi <= 10),
+  )
+```
+
+
+
+
+
+
+
+
+
+
+```{r datsav}
+# dfc <- df
+#save(sales_df, sales_df_in, file = here("data/rdata", "cod_2022-2025geofin.RData"))
+save(df, file = here("data/rdata", "cod_2021-2026_19a.RData"))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

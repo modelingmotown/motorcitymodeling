@@ -1,0 +1,349 @@
+---
+title: "Model Predictor Testing and Optimization"
+author: |
+  | Elliot Dean - Program Analyst IV  
+  | Office of the Chief Financial Officer | Office of the Assessor
+  | City of Detroit
+date: "`r sub('^0', '', format(Sys.Date(), '%d %B %Y'))`"
+geometry: margin = 1.5cm
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+mainfont: Arial
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, error = FALSE, echo = FALSE)
+```
+
+```{r lib_load}
+library(tidyverse)   # data wrangling & ggplot2
+library(janitor)     # functions for examining and cleaning dirty data
+library(kableExtra)  # simple table generator
+library(here)        # Find files within a project
+library(olsrr)       # package for p-value backward elimination
+library(broom)       # summarizes key information about models
+library(rlang)       # functions for Base Types and Core R and 'Tidyverse' Features
+library(car)         # VIF, influence measures helpers
+library(scales)      # provides the internal scaling infrastructure used by ggplot
+library(mgcv)        # Mixed GAM Computation Vehicle
+library(fastDummies) # Fast Creation of Dummy (Binary) Columns & Rows from Categorical Variables
+library(diffdf)      # tools for working with data frame difference
+library(gratia)      # ggplot’based graphics + utility functions for working with GAMs
+```
+
+---
+
+```{r fun}
+load(file = here("rmds/modfunctions", "modfunctions12.RData"))
+```
+
+Functions Used: modfunctions_notes.R + modelfunctions.R
+
+```{r dataload}
+load(file = here("data/rdata", "cod_2022-2025geo.RData"))    # from cod_geospatials.Rmd
+df <- sales_df
+```
+
+---
+
+## Model I
+
+```{r mod1}
+formula_time <- ln_sppsf ~ arterial + single_family1story + half_duplex1story + half_duplex2story +
+  smallest + small + large + largest + # s(lnsbldsf, bs="cs", k=10)
+  two_plus_baths + powder_room + # s(totalbath, bs="cs", k=6)
+  good + fair + poor + very_poor_unsound + qabove_avg + qbelow_avg + # citycd
+  s(sresb_yearbuilt, bs = "cs", k = 10) + crawl + slab + s(ln_garagespaces, bs = "cs", k = 4) +
+  fireplace + hot_water + elec_baseboard + wall + central_air + s(months, bs = "cs", k = 10)
+
+mod_time <- gam(
+  formula_time, data = df, method = "REML", select = TRUE # adds an extra penalty to the null space of the basis
+  #                            method = "GCV.Cp" , select = FALSE                                
+)
+#summary(mod_time)
+
+#df <- add_smooth_time_index(df, mod_time) 
+
+formula_time1 <- ln_sppsf ~ arterial + single_family1story + half_duplex1story + half_duplex2story +
+  smallest + small + large + largest + s(lnsbldsf, bs="cs", k=10) +
+  two_plus_baths + powder_room + s(totalbath, bs="cs", k=6) +
+  good + fair + poor + very_poor_unsound + qabove_avg + qbelow_avg + 
+  s(sresb_yearbuilt, bs = "cs", k = 10) + crawl + slab + s(ln_garagespaces, bs = "cs", k = 4) +
+  fireplace + hot_water + elec_baseboard + wall + central_air + s(months, bs = "cs", k = 10)
+
+mod_time1 <- gam(formula_time1, data = df, method = "REML", select = TRUE)
+
+formula_time2 <- ln_sppsf ~ arterial + single_family1story + half_duplex1story + half_duplex2story +
+  smallest + small + large + largest + s(lnsbldsf, bs="cs", k=10) +
+  two_plus_baths + powder_room + s(totalbath, bs="cs", k=6) +
+  good + fair + poor + very_poor_unsound + qabove_avg + qbelow_avg + 
+  s(sresb_yearbuilt, bs = "cs", k = 10) + crawl + slab + s(ln_garagespaces, bs = "cs", k = 4) +
+  fireplace + hot_water + elec_baseboard + wall + central_air + s(months, bs = "cs", k = 10) +
+  s(dist_henryford_mi, bs = "cs", k = 8) + s(drive_henryford_min, bs = "cs", k = 8) +
+  s(dist_guardian_mi, bs = "cs", k = 8) + s(drive_guardian_min, bs = "cs", k = 8) +
+  s(dist_dequindre_mi, bs = "cs", k = 8) + s(drive_dequindre_min, bs = "cs", k = 8)
+
+mod_time2 <- gam(formula_time2, data = df, method = "REML", select = TRUE)
+
+formula_time3 <- ln_sppsf ~ arterial + single_family1story + half_duplex1story + half_duplex2story +
+  smallest + small + large + largest + s(lnsbldsf, bs="cs", k=10) +
+  two_plus_baths + powder_room + s(totalbath, bs="cs", k=6) +
+  good + fair + poor + very_poor_unsound + qabove_avg + qbelow_avg + 
+  s(sresb_yearbuilt, bs = "cs", k = 10) + crawl + slab + s(ln_garagespaces, bs = "cs", k = 4) +
+  fireplace + hot_water + elec_baseboard + wall + central_air + s(months, bs = "cs", k = 10) +
+  s(dist_henryford_mi, bs = "cs", k = 8) + s(drive_henryford_min, bs = "cs", k = 8) +
+  s(dist_guardian_mi, bs = "cs", k = 8) + s(drive_guardian_min, bs = "cs", k = 8) +
+  s(dist_dequindre_mi, bs = "cs", k = 8) + s(drive_dequindre_min, bs = "cs", k = 8) +
+  s(dist_belleisle_mi, bs = "cs", k = 8) + s(drive_belleisle_min, bs = "cs", k = 8) +
+  s(dist_cayairport_mi, bs = "cs", k = 8) + s(drive_cayairport_min, bs = "cs", k = 8) +
+  s(dist_dtw_mi, bs = "cs", k = 8) + s(drive_dtw_min, bs = "cs", k = 8)
+
+mod_time3 <- gam(formula_time3, data = df, method = "REML", select = TRUE)
+
+formula_time4 <- ln_sppsf ~ arterial + single_family1story + half_duplex1story + half_duplex2story +
+  smallest + small + large + largest + s(lnsbldsf, bs="cs", k=10) +
+  two_plus_baths + powder_room + s(totalbath, bs="cs", k=6) +
+  good + fair + poor + very_poor_unsound + qabove_avg + qbelow_avg + 
+  s(sresb_yearbuilt, bs = "cs", k = 10) + crawl + slab + s(ln_garagespaces, bs = "cs", k = 4) +
+  fireplace + hot_water + elec_baseboard + wall + central_air + s(months, bs = "cs", k = 10) +
+  s(dist_henryford_mi, bs = "cs", k = 8) + s(drive_henryford_min, bs = "cs", k = 8) +
+  s(dist_guardian_mi, bs = "cs", k = 8) + s(drive_guardian_min, bs = "cs", k = 8) +
+  s(dist_dequindre_mi, bs = "cs", k = 8) + s(drive_dequindre_min, bs = "cs", k = 8) +
+  s(dist_belleisle_mi, bs = "cs", k = 8) + s(drive_belleisle_min, bs = "cs", k = 8) +
+  s(dist_cayairport_mi, bs = "cs", k = 8) + s(drive_cayairport_min, bs = "cs", k = 8) +
+  s(dist_dtw_mi, bs = "cs", k = 8) + s(drive_dtw_min, bs = "cs", k = 8) +
+  near_downtown_1mi + near_downtown_5mi + near_downtown_10mi
+
+mod_time4 <- gam(formula_time4, data = df, method = "REML", select = TRUE)
+
+formula_time5 <- ln_sppsf ~ arterial + single_family1story + half_duplex1story + half_duplex2story +
+  smallest + small + large + largest + s(lnsbldsf, bs="cs", k=10) +
+  two_plus_baths + powder_room + s(totalbath, bs="cs", k=6) +
+  good + fair + poor + very_poor_unsound + qabove_avg + qbelow_avg + 
+  s(sresb_yearbuilt, bs = "cs", k = 10) + crawl + slab + s(ln_garagespaces, bs = "cs", k = 4) +
+  fireplace + hot_water + elec_baseboard + wall + central_air + s(months, bs = "cs", k = 10) +
+  s(dist_henryford_mi, bs = "cs", k = 8) + s(drive_henryford_min, bs = "cs", k = 8) +
+  s(dist_guardian_mi, bs = "cs", k = 8) + s(drive_guardian_min, bs = "cs", k = 8) +
+  s(dist_dequindre_mi, bs = "cs", k = 8) + s(drive_dequindre_min, bs = "cs", k = 8) +
+  s(dist_belleisle_mi, bs = "cs", k = 8) + s(drive_belleisle_min, bs = "cs", k = 8) +
+  s(dist_cayairport_mi, bs = "cs", k = 8) + s(drive_cayairport_min, bs = "cs", k = 8) +
+  s(dist_dtw_mi, bs = "cs", k = 8) + s(drive_dtw_min, bs = "cs", k = 8) +
+  s(dist_palmer_mi, bs = "cs", k = 8) + s(drive_palmer_min, bs = "cs", k = 8) +
+  s(dist_roosevelt_mi, bs = "cs", k = 8) + s(drive_roosevelt_min, bs = "cs", k = 8) +
+  s(dist_dmc_mi, bs = "cs", k = 8) + s(drive_dmc_min, bs = "cs", k = 8) +
+  near_downtown_1mi + near_downtown_5mi + near_downtown_10mi
+
+mod_time5 <- gam(formula_time5, data = df, method = "REML", select = TRUE)
+
+```
+
+```{r mod1m, results='asis'}
+model_metrics_A(mod_time, "LN\\_SPPSF model fit statistics")
+gct1 <- gam_coef_table(mod_time, "LN\\_SPPSF model coefficients (95% CI)", format = "latex")
+gct1$kable
+```
+
+```{r mod1ma, results='asis'}
+model_metrics_A(mod_time1, "LN\\_SPPSF model fit statistics1")
+gct11 <- gam_coef_table(mod_time1, "LN\\_SPPSF model coefficients1 (95% CI)", format = "latex")
+gct11$kable
+```
+
+```{r mod1mb, results='asis'}
+model_metrics_A(mod_time2, "LN\\_SPPSF model fit statistics2")
+gct111 <- gam_coef_table(mod_time2, "LN\\_SPPSF model coefficients2 (95% CI)", format = "latex")
+gct111$kable
+```
+
+```{r mod1mc, results='asis'}
+model_metrics_A(mod_time3, "LN\\_SPPSF model fit statistics3")
+gct12 <- gam_coef_table(mod_time3, "LN\\_SPPSF model coefficients3 (95% CI)", format = "latex")
+gct12$kable
+```
+
+```{r mod1md, results='asis'}
+model_metrics_A(mod_time4, "LN\\_SPPSF model fit statistics4")
+gct112 <- gam_coef_table(mod_time4, "LN\\_SPPSF model coefficients4 (95% CI)", format = "latex")
+gct112$kable
+```
+
+```{r mod1me, results='asis'}
+model_metrics_A(mod_time5, "LN\\_SPPSF model fit statistics5")
+gct122 <- gam_coef_table(mod_time5, "LN\\_SPPSF model coefficients5 (95% CI)", format = "latex")
+gct122$kable
+```
+
+---
+
+## Model II
+
+```{r mod2}
+formula_ln_price_no_ecf <- ln_price ~
+  s(ln_landratio, bs = "cs", k = 10) + s(ln_base_bldgsize_ratio, bs = "cs", k = 10) +
+  arterial + single_family1story + half_duplex1story + half_duplex2story +
+  smallest + small + large + largest + two_plus_baths + powder_room +
+  good + fair + poor + very_poor_unsound + qabove_avg + qbelow_avg +
+  s(sresb_yearbuilt, bs = "cs", k = 10) + crawl + slab + s(ln_garagespaces, bs = "cs", k = 4) +
+  fireplace + hot_water + elec_baseboard + wall + central_air + s(months, bs = "cs", k = 10)
+
+mod_ln_price_no_ecf <- gam(formula_ln_price_no_ecf, data = df, method = "REML", select = TRUE)
+
+#summary(mod_ln_price_no_ecf)
+
+formula_ln_price_no_ecf1 <- ln_price ~
+  s(ln_landratio, bs = "cs", k = 10) + s(ln_base_bldgsize_ratio, bs = "cs", k = 10) +
+  arterial + single_family1story + half_duplex1story + half_duplex2story +
+  smallest + small + large + largest + s(lnsbldsf, bs="cs", k=10) +
+  two_plus_baths + powder_room + s(totalbath, bs="cs", k=6) +
+  good + fair + poor + very_poor_unsound + qabove_avg + qbelow_avg +
+  s(sresb_yearbuilt, bs = "cs", k = 10) + crawl + slab + s(ln_garagespaces, bs = "cs", k = 4) +
+  fireplace + hot_water + elec_baseboard + wall + central_air + s(months, bs = "cs", k = 10)
+
+mod_ln_price_no_ecf1 <- gam(formula_ln_price_no_ecf1, data = df, method = "REML", select = TRUE)
+
+formula_ln_price_no_ecf2 <- ln_price ~
+  s(ln_landratio, bs = "cs", k = 10) + s(ln_base_bldgsize_ratio, bs = "cs", k = 10) +
+  arterial + single_family1story + half_duplex1story + half_duplex2story +
+  smallest + small + large + largest + two_plus_baths + powder_room +
+  good + fair + poor + very_poor_unsound + qabove_avg + qbelow_avg +
+  s(sresb_yearbuilt, bs = "cs", k = 10) + crawl + slab + s(ln_garagespaces, bs = "cs", k = 4) +
+  fireplace + hot_water + elec_baseboard + wall + central_air + s(months, bs = "cs", k = 10) +
+  s(dist_henryford_mi, bs = "cs", k = 8) + s(drive_henryford_min, bs = "cs", k = 8) +
+  s(dist_guardian_mi, bs = "cs", k = 8) + s(drive_guardian_min, bs = "cs", k = 8) +
+  s(dist_dequindre_mi, bs = "cs", k = 8) + s(drive_dequindre_min, bs = "cs", k = 8)
+
+mod_ln_price_no_ecf2 <- gam(formula_ln_price_no_ecf2, data = df, method = "REML", select = TRUE)
+
+formula_ln_price_no_ecf3 <- ln_price ~
+  s(ln_landratio, bs = "cs", k = 10) + s(ln_base_bldgsize_ratio, bs = "cs", k = 10) +
+  arterial + single_family1story + half_duplex1story + half_duplex2story +
+  smallest + small + large + largest + two_plus_baths + powder_room +
+  good + fair + poor + very_poor_unsound + qabove_avg + qbelow_avg +
+  s(sresb_yearbuilt, bs = "cs", k = 10) + crawl + slab + s(ln_garagespaces, bs = "cs", k = 4) +
+  fireplace + hot_water + elec_baseboard + wall + central_air + s(months, bs = "cs", k = 10) +
+  s(dist_henryford_mi, bs = "cs", k = 8) + s(drive_henryford_min, bs = "cs", k = 8) +
+  s(dist_guardian_mi, bs = "cs", k = 8) + s(drive_guardian_min, bs = "cs", k = 8) +
+  s(dist_dequindre_mi, bs = "cs", k = 8) + s(drive_dequindre_min, bs = "cs", k = 8) +
+  s(dist_belleisle_mi, bs = "cs", k = 8) + s(drive_belleisle_min, bs = "cs", k = 8) +
+  s(dist_cayairport_mi, bs = "cs", k = 8) + s(drive_cayairport_min, bs = "cs", k = 8) +
+  s(dist_dtw_mi, bs = "cs", k = 8) + s(drive_dtw_min, bs = "cs", k = 8)
+
+mod_ln_price_no_ecf3 <- gam(formula_ln_price_no_ecf3, data = df, method = "REML", select = TRUE)
+
+formula_ln_price_no_ecf4 <- ln_price ~
+  s(ln_landratio, bs = "cs", k = 10) + s(ln_base_bldgsize_ratio, bs = "cs", k = 10) +
+  arterial + single_family1story + half_duplex1story + half_duplex2story +
+  smallest + small + large + largest + two_plus_baths + powder_room +
+  good + fair + poor + very_poor_unsound + qabove_avg + qbelow_avg +
+  s(sresb_yearbuilt, bs = "cs", k = 10) + crawl + slab + s(ln_garagespaces, bs = "cs", k = 4) +
+  fireplace + hot_water + elec_baseboard + wall + central_air + s(months, bs = "cs", k = 10) +
+  s(dist_henryford_mi, bs = "cs", k = 8) + s(drive_henryford_min, bs = "cs", k = 8) +
+  s(dist_guardian_mi, bs = "cs", k = 8) + s(drive_guardian_min, bs = "cs", k = 8) +
+  s(dist_dequindre_mi, bs = "cs", k = 8) + s(drive_dequindre_min, bs = "cs", k = 8) +
+  s(dist_belleisle_mi, bs = "cs", k = 8) + s(drive_belleisle_min, bs = "cs", k = 8) +
+  s(dist_cayairport_mi, bs = "cs", k = 8) + s(drive_cayairport_min, bs = "cs", k = 8) +
+  s(dist_dtw_mi, bs = "cs", k = 8) + s(drive_dtw_min, bs = "cs", k = 8) +
+  near_downtown_1mi + near_downtown_5mi + near_downtown_10mi
+
+mod_ln_price_no_ecf4 <- gam(formula_ln_price_no_ecf4, data = df, method = "REML", select = TRUE)
+
+formula_ln_price_no_ecf5 <- ln_price ~
+  s(ln_landratio, bs = "cs", k = 10) + s(ln_base_bldgsize_ratio, bs = "cs", k = 10) +
+  arterial + single_family1story + half_duplex1story + half_duplex2story +
+  smallest + small + large + largest + two_plus_baths + powder_room +
+  good + fair + poor + very_poor_unsound + qabove_avg + qbelow_avg +
+  s(sresb_yearbuilt, bs = "cs", k = 10) + crawl + slab + s(ln_garagespaces, bs = "cs", k = 4) +
+  fireplace + hot_water + elec_baseboard + wall + central_air + s(months, bs = "cs", k = 10) +
+  s(dist_henryford_mi, bs = "cs", k = 8) + s(drive_henryford_min, bs = "cs", k = 8) +
+  s(dist_guardian_mi, bs = "cs", k = 8) + s(drive_guardian_min, bs = "cs", k = 8) +
+  s(dist_dequindre_mi, bs = "cs", k = 8) + s(drive_dequindre_min, bs = "cs", k = 8) +
+  s(dist_belleisle_mi, bs = "cs", k = 8) + s(drive_belleisle_min, bs = "cs", k = 8) +
+  s(dist_cayairport_mi, bs = "cs", k = 8) + s(drive_cayairport_min, bs = "cs", k = 8) +
+  s(dist_dtw_mi, bs = "cs", k = 8) + s(drive_dtw_min, bs = "cs", k = 8) +
+  s(dist_palmer_mi, bs = "cs", k = 8) + s(drive_palmer_min, bs = "cs", k = 8) +
+  s(dist_roosevelt_mi, bs = "cs", k = 8) + s(drive_roosevelt_min, bs = "cs", k = 8) +
+  s(dist_dmc_mi, bs = "cs", k = 8) + s(drive_dmc_min, bs = "cs", k = 8) +
+  near_downtown_1mi + near_downtown_5mi + near_downtown_10mi
+
+mod_ln_price_no_ecf5 <- gam(formula_ln_price_no_ecf5, data = df, method = "REML", select = TRUE)
+
+
+```
+
+```{r mod2m, results='asis'}
+model_metrics_A(mod_ln_price_no_ecf, "LN\\_PRICE model fit statistics")
+gct2 <- gam_coef_table(mod_ln_price_no_ecf, "LN\\_PRICE model coefficients (95% CI)", format = "latex")
+gct2$kable
+```
+
+```{r mod2ma, results='asis'}
+model_metrics_A(mod_ln_price_no_ecf1, "LN\\_PRICE model fit statistics1")
+gct21 <- gam_coef_table(mod_ln_price_no_ecf1, "LN\\_PRICE model coefficients1 (95% CI)", format = "latex")
+gct21$kable
+```
+
+```{r mod2mb, results='asis'}
+model_metrics_A(mod_ln_price_no_ecf2, "LN\\_PRICE model fit statistics2")
+gct211 <- gam_coef_table(mod_ln_price_no_ecf2, "LN\\_PRICE model coefficients2 (95% CI)", format = "latex")
+gct211$kable
+```
+
+```{r mod2mc, results='asis'}
+model_metrics_A(mod_ln_price_no_ecf3, "LN\\_PRICE model fit statistics3")
+gct22 <- gam_coef_table(mod_ln_price_no_ecf3, "LN\\_PRICE model coefficients3 (95% CI)", format = "latex")
+gct22$kable
+```
+
+```{r mod2md, results='asis'}
+model_metrics_A(mod_ln_price_no_ecf4, "LN\\_PRICE model fit statistics4")
+gct212 <- gam_coef_table(mod_ln_price_no_ecf4, "LN\\_PRICE model coefficients4 (95% CI)", format = "latex")
+gct212$kable
+```
+
+```{r mod2me, results='asis'}
+model_metrics_A(mod_ln_price_no_ecf5, "LN\\_PRICE model fit statistics5")
+gct222 <- gam_coef_table(mod_ln_price_no_ecf5, "LN\\_PRICE model coefficients5 (95% CI)", format = "latex")
+gct222$kable
+```
+
+---
+
+```{r}
+draw(mod_ln_price_no_ecf5, select = "s(dist_cayairport_mi)")
+```
+
+
+```{r}
+formula_ln_price_no_ecf6 <- ln_price ~
+  s(ln_landratio, bs = "cs", k = 10) + s(ln_base_bldgsize_ratio, bs = "cs", k = 10) +
+  arterial + single_family1story + half_duplex1story + half_duplex2story +
+  smallest + small + large + largest + two_plus_baths + powder_room +
+  good + fair + poor + very_poor_unsound + qabove_avg + qbelow_avg +
+  s(sresb_yearbuilt, bs = "cs", k = 10) + crawl + slab + s(ln_garagespaces, bs = "cs", k = 4) +
+  fireplace + hot_water + elec_baseboard + wall + central_air + s(months, bs = "cs", k = 10) +
+  s(dist_henryford_mi, bs = "cs", k = 8) + s(drive_henryford_min, bs = "cs", k = 8) +
+  s(dist_guardian_mi, bs = "cs", k = 8) + s(drive_guardian_min, bs = "cs", k = 8) +
+  s(dist_dequindre_mi, bs = "cs", k = 8) + s(drive_dequindre_min, bs = "cs", k = 8) +
+  s(dist_belleisle_mi, bs = "cs", k = 8) + s(drive_belleisle_min, bs = "cs", k = 8) +
+  s(dist_cayairport_mi, bs = "cs", k = 8) + s(drive_cayairport_min, bs = "cs", k = 8) +
+  s(dist_dtw_mi, bs = "cs", k = 8) + s(drive_dtw_min, bs = "cs", k = 8) +
+  s(dist_palmer_mi, bs = "cs", k = 8) + s(drive_palmer_min, bs = "cs", k = 8) +
+  s(dist_roosevelt_mi, bs = "cs", k = 8) + s(drive_roosevelt_min, bs = "cs", k = 8) +
+  s(dist_dmc_mi, bs = "cs", k = 8) + s(drive_dmc_min, bs = "cs", k = 8) +
+  near_downtown_1mi + near_downtown_5mi + near_downtown_10mi + s(x_coord, y_coord)
+
+mod_ln_price_no_ecf6 <- gam(formula_ln_price_no_ecf6, data = df, method = "REML", select = TRUE)
+```
+
+```{r}
+draw(mod_ln_price_no_ecf6, select = "s(dist_cayairport_mi)")
+```
+
+
+
+
+
+
+

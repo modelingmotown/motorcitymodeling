@@ -1,0 +1,222 @@
+---
+title: "Generalized Additive Model for Council District IV (2023 - 2025 Sales)"
+author: |
+  | Elliot Dean - Program Analyst IV  
+  | Office of the Chief Financial Officer | Office of the Assessor
+  | City of Detroit
+date: "`r sub('^0', '', format(Sys.Date(), '%d %B %Y'))`"
+geometry: margin = 1.5cm
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+mainfont: Arial
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, error = FALSE, echo = FALSE)
+```
+
+```{r lib_load}
+library(tidyverse)   # data wrangling & ggplot2
+library(janitor)     # functions for examining and cleaning dirty data
+library(kableExtra)  # simple table generator
+library(here)        # Find files within a project
+library(olsrr)       # package for p-value backward elimination
+library(broom)       # summarizes key information about models
+library(rlang)       # functions for Base Types and Core R and 'Tidyverse' Features
+library(car)         # VIF, influence measures helpers
+library(scales)      # provides the internal scaling infrastructure used by ggplot
+```
+
+```{r fun, results='hide'}
+codf    <- readRDS(file = here("rmds/modfunctions", "codfunctions.rds"))
+codform <- readRDS(file = here("rmds", "codformulas.rds"))
+
+codf_env <- list2env(codf, parent = globalenv())
+for (nm in names(codf)) {environment(codf[[nm]]) <- codf_env}
+list2env(codf, envir = codf_env)
+```
+
+```{r data_import}
+df <- read_csv(here("data/city", "salesSFapr2023toMarch2025Updated.csv")) |>
+  rename_with(tolower) |> filter(ccd == 4)
+
+res23    <- codf$prep_cod_sales(df, origin_month = as.Date("2023-04-01"))
+df       <- res23$data
+ecfs_col <- res23$ecfs_col
+```
+
+---
+
+## Model I
+
+```{r mod1}
+mod_time <- mgcv::gam(formula = codform$formula_time_nlm, data = df, method = "REML")
+summary(mod_time)
+mgcv::gam.check(mod_time)
+
+df <- codf$make_time_adjusted_df_gam(df, formula_time = codform$formula_time_nlm)
+
+# 7) Predict + back-transform to dollars
+df <- df %>%
+  mutate(
+    pred_ln = predict(mod_time, newdata = df, type = "link"),
+    esp     = exp(pred_ln),     # predicted TASP dollars
+    ratio   = esp / tasp
+  )
+# 8) PRD / COD / PRB
+cod <- function(r) {
+  r <- r[is.finite(r)]
+  med <- median(r, na.rm = TRUE)
+  100 * mean(abs(r - med), na.rm = TRUE) / med
+}
+
+prd <- function(pred, actual) {
+  ok <- is.finite(pred) & is.finite(actual) & actual > 0
+  p <- pred[ok]; a <- actual[ok]
+  r <- p / a
+  mean_r <- mean(r, na.rm = TRUE)
+  wmean_r <- sum(p, na.rm = TRUE) / sum(a, na.rm = TRUE)
+  mean_r / wmean_r
+}
+
+prb <- function(pred, actual) {
+  ok <- is.finite(pred) & is.finite(actual) & actual > 0
+  p <- pred[ok]; a <- actual[ok]
+  r <- p / a
+  med <- median(r, na.rm = TRUE)
+  dev_pct <- (r - med) / med * 100
+  vproxy <- (p + a) / 2
+  x <- log(vproxy) - mean(log(vproxy), na.rm = TRUE)
+  coef(lm(dev_pct ~ x))[["x"]] / 100
+}
+
+assess_stats <- df %>%
+  summarise(
+    n = n(),  median_ratio = median(ratio, na.rm = TRUE),
+    mean_ratio   = mean(ratio, na.rm = TRUE),
+    wmean_ratio  = sum(esp, na.rm = TRUE) / sum(tasp, na.rm = TRUE),
+    prd = prd(esp, tasp),  cod = cod(ratio), prb = prb(esp, tasp)
+  )
+
+assess_stats
+```
+
+---
+
+```{r mod1a}
+rrmetrics <- codf$ratio_metrics(df, esp, saleprice)
+
+knitr::kable(
+  rrmetrics,  format   = "latex",  booktabs = TRUE,
+  caption  = "District 4 LN\\_SPPSF NLM I Assessing Coefficients" 
+) %>%  kable_styling(latex_options = c("hold_position", "striped"), font_size = 8)
+```
+
+---
+
+## Model II
+
+```{r mod2}
+mod_ln_price_no_ecf <- mgcv::gam(formula = codform$formula_ln_price_no_ecf_nlm, data = df, method = "REML")
+summary(mod_ln_price_no_ecf)
+mgcv::gam.check(mod_ln_price_no_ecf)
+
+df <- df %>%
+  mutate(
+    pred_ln2 = predict(mod_ln_price_no_ecf, newdata = df, type = "link"),
+    esp2 = exp(pred_ln2), ratio2 = esp2 / tasp
+  )
+
+assess_stats <- df %>%
+  summarise(
+    n = n(),  median_ratio = median(ratio2, na.rm = TRUE),
+    mean_ratio   = mean(ratio2, na.rm = TRUE),
+    wmean_ratio  = sum(esp2, na.rm = TRUE) / sum(tasp, na.rm = TRUE),
+    prd = prd(esp2, tasp),  cod = cod(ratio2), prb = prb(esp2, tasp)
+  )
+
+assess_stats
+```
+
+---
+
+```{r mod2a}
+rrmetrics <- codf$ratio_metrics(df, esp2, saleprice)
+
+knitr::kable(
+  rrmetrics,  format   = "latex",  booktabs = TRUE,
+  caption  = "District 4 LN\\_PRICE (No ECFs) NLM I Assessing Coefficients" 
+) %>%  kable_styling(latex_options = c("hold_position", "striped"), font_size = 8)
+```
+
+---
+
+## Model III
+
+```{r mod3}
+mod_base <- mgcv::gam(formula = codform$formula_base_nlm, data = df, method = "REML")
+summary(mod_base)
+mgcv::gam.check(mod_base)
+
+#df <- codf$make_time_adjusted_df_gam(df, formula_time = codform$formula_time_nlm)
+
+df <- df %>%
+  mutate(
+    pred_ln3 = predict(mod_base, newdata = df, type = "link"),
+    esp3     = exp(pred_ln3), ratio3 = esp3 / tasp
+  )
+
+assess_stats <- df %>%
+  summarise(
+    n = n(),  median_ratio = median(ratio3, na.rm = TRUE),
+    mean_ratio   = mean(ratio3, na.rm = TRUE),
+    wmean_ratio  = sum(esp3, na.rm = TRUE) / sum(tasp, na.rm = TRUE),
+    prd = prd(esp3, tasp),  cod = cod(ratio3), prb = prb(esp3, tasp)
+  )
+
+assess_stats
+```
+
+---
+
+## Model IV
+
+```{r mod4}
+mod_tasp <- mgcv::gam(formula = codform$formula_ln_tasp_nlm, data = df, method = "REML")
+summary(mod_tasp)
+mgcv::gam.check(mod_tasp)
+
+#df <- codf$make_time_adjusted_df_gam(df, formula_time = codform$formula_time_nlm)
+
+df <- df %>%
+  mutate(
+    pred_ln4 = predict(mod_tasp, newdata = df, type = "link"),
+    esp4     = exp(pred_ln4), ratio4 = esp4 / tasp
+  )
+
+assess_stats <- df %>%
+  summarise(
+    n = n(),  median_ratio = median(ratio4, na.rm = TRUE),
+    mean_ratio   = mean(ratio4, na.rm = TRUE),
+    wmean_ratio  = sum(esp4, na.rm = TRUE) / sum(tasp, na.rm = TRUE),
+    prd = prd(esp4, tasp),  cod = cod(ratio4), prb = prb(esp4, tasp)
+  )
+
+assess_stats
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+

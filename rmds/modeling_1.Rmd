@@ -1,0 +1,411 @@
+---
+title:  'Model Trial I'
+author: 'Elliot Dean'
+date:   '`r Sys.Date()`'
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  warning = FALSE,
+  message = FALSE,
+  error   = FALSE
+)
+```
+
+### Introduction
+
+This is an initial test to integrate sales and property data from the open source repository of the Assessors Office. [Property Sales](https://data.detroitmi.gov/datasets/27dc11249f5c41c0873449984986ea2f_3/explore?location=42.352654%2C-83.099544%2C10.33) and [Parcel](https://data.detroitmi.gov/datasets/3c784c118e5c4083b37038e9b38573df_0/explore?location=42.352624%2C-83.099130%2C10.57) data were obtained from the City of Detroit Open Data Portal. These files are named sales_det.csv and det_pars.csv respectively.
+
+------------------------------------------------------------------------
+
+### Libraries
+
+library(tidyverse)  
+library(data.table)  
+library(magrittr)  
+library(janitor)  
+*library(reticulate)
+*library(DBI)
+*library(odbc)
+*library(sf)
+install.packages(c('tidyverse', 'caret', 'broom', 'car', 'lmtest', 'ggpubr', 'ggpmisc'))
+install.packages(c('reticulate', 'DBI', 'odbc', 'sf', 'corrplot', 'httr'))
+
+#### Load Necessary Libraries
+
+```{r lib_load}
+library(tidyverse)   # data wrangling & ggplot2
+library(magrittr)
+library(janitor)
+library(caret)       # train/test split, cross‐validation
+library(broom)       # tidy model output
+library(car)         # VIF, Durbin‐Watson
+library(lmtest)      # Breusch–Pagan test
+# library(data.table)
+# library(reticulate)
+```
+
+#### Importing and Organizing Data
+
+Option 1, data.table, for larger sets, but I started with tidyverse below.
+
+```{r, eval = FALSE}
+# Import Parcel AND Sales Data using the fread function from the data.table package
+
+parcelDatas <- fread('data/det_pars.csv')
+salesDatas  <- fread('data/sales_det.csv')
+```
+
+START HERE:
+
+Importing and Organizing Data
+
+```{r data_import}
+# Import Parcel AND Sales Data using read_csv from readr package (Tidyverse)
+# The clean_names method from janitor is used to standardized column names
+parcels_24 <- read_csv('data/DETPAR24.CSV')  |> 
+  clean_names()
+sales_24   <- read_csv('data/DETSALE24.CSV') |> 
+  clean_names()
+
+# Import SPSS Data using read_sav from haven package
+# Mutate creates new columns that are functions of existing variables
+data <- read_sav('data/v2Hoods_GrandmontAreaNewCond_Data.sav') |>
+  mutate(across(where(is.labelled), as_factor)) |>
+  clean_names()
+```
+
+Input data (as dataframes) can be saved as R objects
+
+```{r save_input, eval = FALSE}
+# The save function is included in base R
+save(parcels, sales, data, file = 'data/input_data.RData')
+```
+
+The data contained in R objects can be retrieved with the load function
+
+```{r load_input, eval = FALSE}
+# The load function is included in base R
+load('data/input_data.RData')
+```
+
+
+The data tables will be merged on 'parcel_number':
+
+```{r data_merge}
+df <- merge(sales, parcels, by = 'parcel_number')
+```
+
+Drop duplicate columns + content
+
+```{r drop_dupe_cols}
+# 1) Transpose to get columns as rows
+mat <- t(as.matrix(df))
+
+# 2) Identify duplicated rows (i.e., duplicate columns in original)
+dups <- duplicated(mat)
+
+# 3) Keep only non-duplicates
+df_clean <- df[ , !dups]
+```
+
+Remove duplicate entries (delete rows where address appears twice)
+
+```{r sel_distinct}
+# Using distinct function, address column
+# Created new dataframe (ddf) to maintain original
+ddf <- df_clean |> 
+  distinct(address, .keep_all = TRUE)
+```
+
+Make zip code, council district, and ward categorical for parameter testing
+
+```{r categorize}
+ddf$zipc  <- as.character(ddf$zip_code)
+ddf$cds   <- as.character(ddf$council_district)
+ddf$wards <- as.character(ddf$ward)
+```
+
+Create a new column - Coordinates (lat_lon) - which merges X and Y coordinates.
+Adding the Google Maps URL for API allows linking, Google Earth also added:
+
+```{r coordinates}
+ddf <- ddf |>  
+  mutate(  # round to 6 decimals
+    lat      = round(y, 6),
+    lon      = round(x, 6),
+    lat_lon  = paste(lat, lon, sep = ','), # combine into'42.334550,-83.043964'
+    gmap_url = paste0(                     # build the Maps search URL
+      'https://www.google.com/maps/search/?api=1&query=', lat_lon
+    ),
+    ge_url   = paste0(                     # build Google Earth search URL
+      'https://earth.google.com/web/@', lat, ',', lon, ',1000a'
+      # 1000 meters above ground (street-level), no tilt/bearing/etc.
+    )
+  # x = longitude, y = latitude; EPSG:4326 is standard WGS84
+  # df_sf <- st_as_sf(df, coords = c("x", "y"), crs = 4326, remove = FALSE)
+  )
+```
+
+Remove value, build, sqft, floor area outlier(s):
+
+```{r data_filer}
+ddf <- ddf |> 
+  filter(assessed_value < 1000000) |> 
+  filter(year_built > 1920 & year_built < 2026) |> 
+  filter(total_square_footage < 100000 & total_square_footage > 0) |>  
+  filter(total_floor_area > 0) |> 
+  filter(cds != '22' & cds != '62') |> 
+  filter(total_acreage > 0) |> 
+  filter(! zipc %in% c('482153', '48362', '84227', 'NA'))
+```
+
+Correctly format columns (Ward, date, etc):
+
+```{r data_form}
+ddf <- ddf |> 
+  mutate(ward = sub('^0+', '', ddf$ward))
+
+ddf$sale_date.x <- as.Date(ddf$sale_date.x, format = '%m/%d/%Y')
+ddf$sale_date.y <- sub('\\+00$', '', ddf$sale_date.y)
+ddf$sale_date.y <- as.Date(ymd_hms(ddf$sale_date.y, tz = 'UTC'))
+```
+
+Check dataframe data types using str function:
+
+```{r check_df, eval = FALSE}
+str(ddf)
+```
+
+As performed previously, merged datasets can also be saved as R objects for faster loading:
+
+```{r save_dfs, eval = FALSE}
+# The save function is included in base R
+save(df, ddf, file = 'data/data_frames2.RData')
+```
+
+LOAD DFS HERE:
+
+```{r load_dfs, eval = FALSE}
+load('data/data_frames2.RData')
+```
+
+Get some visualizations going
+
+```{r vis1}
+ggplot(
+  data = ddf,
+  mapping = aes(x = year_built, y = assessed_value, color = wards)
+) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  labs(
+    title = "Assessed Value by Build Year",
+    subtitle = "...",
+    x = "Year", y = "Value", color = "Ward"
+  )
+```
+
+```{r vis2}
+ggplot(
+  data = ddf,
+  mapping = aes(x = total_square_footage, y = taxable_value, color = zipc)
+) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  labs(
+    title = "Taxable Value by Square Footage",
+    subtitle = "...",
+    x = "Area", y = "Value", color = "Council District"
+  )
+```
+
+Manipulate data frames further as needed (remove outliers, etc.):
+
+```{r data_filter2}
+ddf2 <- ddf |> 
+  # filter(sale_price.x < 10000000)
+  # 
+  filter(year(sale_date.y) > 1950) |> 
+  filter(sale_price.y < 20000000)  |> 
+  filter(year(sale_date.x) > 1950) |> 
+  filter(sale_price.x < 20000000)
+```
+
+
+```{r vis3}
+ggplot(
+  data = ddf2,
+  mapping = aes(x = sale_price.x, y = sale_price.y, color = zipc)
+) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  labs(
+    title = "Initial Sale Price versus Initial Sale Date",
+    subtitle = "...",
+    x = "Sale Date", y = "Sale Price", color = "Council District"
+  )
+```
+
+```{r vis4}
+ggplot(
+  data = ddf2,
+  mapping = aes(x = sale_date.y, y = sale_price.y, color = cds)
+) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  labs(
+    title = "Final Sale Price versus Final Sale Date",
+    subtitle = "...",
+    x = "Sale Date", y = "Sale Price", color = "Council District"
+  )
+```
+
+
+```{r vis5}
+ggplot(
+  data = ddf,
+  mapping = aes(x = total_acreage, y = taxable_value)
+) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  labs(
+    title = "Taxable Value by Acreage",
+    subtitle = "...",
+    x = "Acres", y = "Value"
+  )
+```
+
+Import different data files:
+
+```{r data_importing}
+# Import Parcel AND Sales Data using read_csv from readr package (Tidyverse)
+# The clean_names method from janitor is used to standardized column names
+parcel <- read_csv('data/EXPONEP.CSV')  |> 
+  clean_names()
+sale   <- read_csv('data/EXPONES.CSV') |> 
+  clean_names()
+```
+
+Save new data as .RData:
+
+```{r save_inputs}
+# The save function is included in base R
+save(parcel, sale, file = 'data/input_datas.RData')
+```
+
+Organize dataframe, look at stuff:
+
+```{r plot_n_matrix}
+# Scatterplots of price vs key predictors
+ddf |>
+  select(assessed_value, total_floor_area, year_built) |>
+  gather(key, val, -assessed_value) |>
+  ggplot(aes(val, assessed_value)) +
+    geom_point(alpha = .4) +
+    facet_wrap(~key, scales = "free_x") +
+    labs(x = NULL, y = "Assessed Value")
+
+# Correlation matrix
+ddf |> 
+  select_if(is.numeric) |>
+  cor(use = "pairwise.complete.obs") |>
+  corrplot::corrplot(method = "ellipse")
+
+```
+
+Split into training & test sets:
+
+```{r sets}
+set.seed(123)
+train_index <- createDataPartition(ddf$assessed_value, p = .7, list = FALSE)
+train_data  <- ddf[train_index, ]
+test_data   <- ddf[-train_index, ]
+
+```
+
+
+Fit a linear regression model:
+
+```{r fit_lrm}
+# Baseline: price ~ sqft_living + bedrooms + bathrooms
+model1 <- lm(assessed_value ~ total_floor_area + year_built, data = train_data)
+summary(model1)
+
+
+```
+
+To add categorical variables or interactions:
+```{r fit_lrm2}
+model2 <- lm(price ~ sqft_living
+                      + bedrooms
+                      + bathrooms
+                      + factor(grade)
+                      + sqft_living:factor(zipcode),
+             data = train_data)
+summary(model2)
+
+```
+
+
+Examine model output with broom:
+
+```{r broom}
+# Coefficients & p‐values
+tidy(model1)
+
+# Overall model metrics (R², AIC, BIC)
+glance(model1)
+
+```
+
+Check regression assumptions:
+
+```{r rega}
+# 1) Residual diagnostics
+par(mfrow = c(2,2))
+plot(model1)
+
+# 2) Multicollinearity
+vif(model1)   # VIF > 5–10 signals trouble
+
+# 3) Heteroskedasticity
+bptest(model1)   # Breusch–Pagan
+
+# 4) Autocorrelation (if data are time-ordered)
+durbinWatsonTest(model1)  
+
+```
+
+
+Evaluate on the test set:
+
+```{r eval_ts}
+pred <- predict(model1, newdata = test_data)
+
+# Compute common metrics
+postResample(pred = pred, obs = test_data$assessed_value)
+#    RMSE    Rsquared      MAE 
+#  123456   0.72         98765 
+
+```
+
+Cross-validation or regularization:
+
+```{r cval_n_reg}
+ctrl <- trainControl(method = "cv", number = 5)
+lasso_fit <- train(assessed_value ~ ., data = train_data,
+                   method = "glmnet",
+                   trControl = ctrl,
+                   tuneLength = 10)
+lasso_fit
+
+```
+
+
+
+
+
+
+

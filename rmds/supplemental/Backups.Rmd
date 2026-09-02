@@ -1,0 +1,918 @@
+---
+title: "Backups"
+author: "Elliot Dean"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r hist_ratio}
+ggplot(data, aes(x = RATIO1)) +
+  geom_histogram(binwidth = 0.5, fill = "blue", color = "white") +
+  labs(
+    title =  "Histogram of Ratios",
+    x     =  "RATIO1",
+    y     =  "Frequency"
+  ) +
+  theme_minimal()
+
+ggplot(data, aes(x = RATIO2)) +
+  geom_histogram(binwidth = 0.5, fill = "pink", color = "white") +
+  labs(
+    x = "RATIO2", y = "Frequency"
+  ) +
+  theme_minimal()
+
+ggplot(data, aes(x = RATIO3)) +
+  geom_histogram(binwidth = 0.5, fill = "limegreen", color = "white") +
+  labs(
+    x = "RATIO3", y = "Frequency"
+  ) +
+  theme_minimal()
+```
+
+## Create Models
+
+```{r mod_make1}
+# ─── 16. First Regression (Backward Selection) ───────────────────────────────────────
+
+# Lines 536 -> 549 in v2Hoods_GrandmontAreaNewCond_Syntax.sps
+# Ensure all variables used for the model exist in the data frame
+# The lm() function is used to fit linear models
+# Here, LN_SPPSF is the dependent variable, the others are factors / predictors
+# data is the data frame containing the variables to be used in the model
+
+mod_one <- lm(LN_SPPSF ~ ARTERIAL + QABOVE_AVG + QBELOW_AVG_POOR +
+                SINGLE_FAMILY1STORY + SINGLE_FAMILY2STORY + HALF_DUPLEX1STORY +
+                HALF_DUPLEX2STORY + TWO_PLUS_BATHS + POWDER_ROOM + SMALL + LARGE +
+                SMALLEST + LARGEST + YB_PRE_1929 + YB_1946_TO_1960 + YB_POST_1961 +
+                LN_GARAGESPACES + FIREPLACE + HOT_WATER + ELEC_BASEBOARD + WALL +
+                CENTRAL_AIR + GOOD + FAIR + POOR + VERY_POOR_UNSOUND +
+                MONTHS_6TO22 + MONTHS_23TO30 + CRAWL + SLAB,
+               data = data)
+
+# scope = list allows for forcibly including parameters in the final model
+# Omitting (line 303 below) allows the tuning to exclude any parameter it chooses
+# Use trace = 1 for verbose, 0 for no output
+step_mod_one <- stats::step(mod_one, direction = 'backward',
+                            scope = list(lower = ~ MONTHS_6TO22 + MONTHS_23TO30,
+                                         upper = formula(mod_one)), trace = 0)
+
+# step_mod_one <- stats::step(mod_one, direction = 'backward', trace = 1)
+
+# ─── 17. Second Regression (Backward Selection) ───────────────────────────────────────
+# Lines 676 -> 692 in v2Hoods_GrandmontAreaNewCond_Syntax.sps
+mod_two <- lm(LN_PRICE ~ LN_LANDRATIO + LN_BASE_BLDGSIZE_RATIO + ARTERIAL +
+                SINGLE_FAMILY1STORY + SINGLE_FAMILY2STORY + HALF_DUPLEX1STORY +
+                HALF_DUPLEX2STORY + TWO_PLUS_BATHS + POWDER_ROOM + SMALL + LARGE +
+                SMALLEST + LARGEST + QABOVE_AVG + QBELOW_AVG_POOR +LN_GARAGESPACES +
+                YB_PRE_1929 + YB_1946_TO_1960 + YB_POST_1961 + FIREPLACE +
+                HOT_WATER + ELEC_BASEBOARD + WALL + CENTRAL_AIR + CRAWL + SLAB +
+                GOOD + FAIR + POOR + VERY_POOR_UNSOUND + MONTHS_6TO22 + MONTHS_23TO30,
+               data = data)
+
+step_mod_two <- stats::step(mod_two, direction = 'backward',
+                            scope = list(lower = ~ MONTHS_6TO22 + MONTHS_23TO30,
+                                         upper = formula(mod_two)), trace = 0)
+
+# step_mod_two <- stats::step(mod_two, direction = 'backward', trace = 1)
+
+# detach("package:recipes", unload = TRUE)
+# reduced_mod <- step(mod_one, direction = "backward")
+
+summary(step_mod_one)
+# summary(step_mod_two)
+
+std_res_smo <- rstandard(step_mod_one)    # Extract standardized residuals
+std_res_smt <- rstandard(step_mod_two) 
+df_res_one  <- augment(step_mod_one)      # Tidy up with augment() - adds a column .std.resid to your data frame.
+df_res_two  <- augment(step_mod_two)
+```
+
+
+```{r}
+data |>                                           # Frequencies of DAN_CONDITION
+  tabyl(SALEPRICE) |> adorn_pct_formatting(digits = 1)
+```
+
+
+## Custom Functions
+
+```{r functions}
+wrap_kable <- function(labels, names, n = 10, caption = NULL){
+  # labels:   character vector of cell‐labels
+  # names:    names(labels) to use as colnames
+  # n:        max number of cols per line
+  # caption:  base caption (we’ll append the chunk range)
+  
+  total <- length(labels)
+  idxs  <- split(seq_len(total), ceiling(seq_len(total)/n))
+  # print(caption)
+  
+  for(i in seq_along(idxs)){
+    ii   <- idxs[[i]]
+    mat  <- matrix(labels[ii], nrow = 1,
+                   dimnames = list(NULL, names[ii]))
+    cap  <- if(is.null(caption)) "" 
+            else paste0(caption, " (cols ", min(ii), "–", max(ii), ")")
+    print(kable(mat, caption = cap))
+  }
+}
+```
+
+
+```{r}
+str(data)
+
+library(kableExtra)
+
+# df_row is your 1×K data.frame
+df_row %>%
+  kable(format = "html", escape = FALSE) %>%    # ← HTML table
+  kable_styling(
+    bootstrap_options = c("striped","hover"),
+    full_width        = FALSE
+  ) %>%
+  scroll_box(width = "100%", height = "300px")
+
+```
+
+author:
+  - "Elliot Dean"
+  - "Office of the Chief Financial Officer | Office of the Assessor"
+  - "City of Detroit"
+
+# ─── Second Regression (Backward Selection) ───────────────────────────────────────
+# Lines 676 -> 692 in v2Hoods_GrandmontAreaNewCond_Syntax.sps
+
+predictors <- c('LN_LANDRATIO','LN_BASE_BLDGSIZE_RATIO','ARTERIAL','SINGLE_FAMILY1STORY',
+            'SINGLE_FAMILY2STORY','HALF_DUPLEX1STORY','HALF_DUPLEX2STORY','TWO_PLUS_BATHS',
+            'POWDER_ROOM','SMALL','LARGE','SMALLEST','LARGEST','QABOVE_AVG','QBELOW_AVG_POOR',
+            'LN_GARAGESPACES','YB_PRE_1929', 'YB_1930_TO_1945', 'YB_1946_TO_1960','YB_POST_1961','FIREPLACE',
+            'HOT_WATER','ELEC_BASEBOARD','WALL','CENTRAL_AIR','CRAWL','SLAB','GOOD','FAIR','POOR',
+            'VERY_POOR_UNSOUND','MONTHS_1TO9','MONTHS_10TO16', 'MONTHS_17TO24')
+
+full_var_form <- reformulate(predictors, response = "LN_PRICE")
+mod_two_rev  <- lm(full_var_form, data = df)
+
+current_mod <- mod_two_rev
+current_preds <- predictors
+
+repeat {
+  ss <- summary(current_mod)
+  pvals <- ss$coefficients[-1, 4]    # drop intercept
+  worst_p <- max(pvals, na.rm = TRUE)
+  
+  if (worst_p <= 0.10) break          # stop when everyone’s in
+  remove_var <- names(pvals)[which.max(pvals)]
+  
+  message("Dropping ", remove_var, " (p=", signif(worst_p,2), ")")
+  current_preds <- setdiff(current_preds, remove_var)
+  current_mod   <- update(current_mod, reformulate(current_preds, "LN_PRICE"))
+}
+
+final_mod <- current_mod
+
+# 4.1 Coefficients & p-values
+coef(final_mod)
+# or for full table:
+summary(final_mod)$coefficients
+
+# 4.2 R², F-statistic & ANOVA
+summary(final_mod)$r.squared
+summary(final_mod)$adj.r.squared
+
+# SPSS “ANOVA” table → R’s anova()
+anova(final_mod)
+
+# 4.3 Outliers / influence diagnostics (SPSS’s OUTS)
+rstudent(final_mod)        # Studentized residuals
+influence.measures(final_mod)
+
+
+
+
+mod_two <- lm(LN_PRICE ~ LN_LANDRATIO + LN_BASE_BLDGSIZE_RATIO + ARTERIAL +
+                SINGLE_FAMILY1STORY + SINGLE_FAMILY2STORY + HALF_DUPLEX1STORY +
+                HALF_DUPLEX2STORY + TWO_PLUS_BATHS + POWDER_ROOM + SMALL + LARGE +
+                SMALLEST + LARGEST + QABOVE_AVG + QBELOW_AVG_POOR +LN_GARAGESPACES +
+                YB_PRE_1929 + YB_1946_TO_1960 + YB_POST_1961 + FIREPLACE +
+                HOT_WATER + ELEC_BASEBOARD + WALL + CENTRAL_AIR + CRAWL + SLAB +
+                GOOD + FAIR + POOR + VERY_POOR_UNSOUND + MONTHS_1TO9 + MONTHS_10TO16 + MONTHS_17TO24,
+               data = df)
+
+step_mod_two <- stats::step(mod_two, direction = 'backward',
+                            scope = list(lower = ~ MONTHS_1TO9 + MONTHS_10TO16,
+                                         upper = formula(mod_two)), trace = 0)
+
+# step_mod_two <- stats::step(mod_two, direction = 'backward', trace = 1)
+
+# detach("package:recipes", unload = TRUE)
+# reduced_mod <- step(mod_one, direction = "backward")
+
+
+# summary(step_mod_two)
+
+std_res_smo <- rstandard(step_mod_one_rev)    # Extract standardized residuals
+std_res_smt <- rstandard(step_mod_two) 
+df_res_one  <- augment(step_mod_one_rev)      # Tidy up with augment() - adds a column .std.resid to your data frame.
+df_res_two  <- augment(step_mod_two)
+
+---
+
+mutate(    # Lines 19170 -> 19178
+    MONTHS_1TO9 = case_when(
+      MONTHS   <= 9 ~ MONTHS,
+      TRUE          ~ 9
+    ),
+    MONTHS_10TO16 = case_when(MONTHS <= 9 ~ 0,  MONTHS <= 16 ~ MONTHS - 9, TRUE ~ 7),
+    MONTHS_17TO24 = case_when(MONTHS <= 16 ~ 0, TRUE ~ MONTHS - 16)
+  ) |> 
+
+```{r logo, echo = FALSE, out.width = '50%', fig.align = 'center'}
+knitr::include_graphics('../notes/items/det_logo_ocfo_1.png')
+```
+
+.
+
+```{r functions}
+  
+wrap_kable_extra <- function(df_one_row, n = 8, caption = NULL){
+  #' df_one_row: a data.frame with exactly one row
+  #' n:          max number of columns per chunk
+  #' caption:    base caption (will append “(cols x–y)” automatically)
+  
+  stopifnot(nrow(df_one_row) == 1)
+  all_cols <- colnames(df_one_row)
+  
+  # split column indices into chunks of size n
+  idxs <- split(seq_along(all_cols), ceiling(seq_along(all_cols)/n))
+  
+  for(i in seq_along(idxs)){
+    cols_i <- all_cols[idxs[[i]]]
+    subdf  <- df_one_row[, cols_i, drop = FALSE]
+    cap_i  <- if (is.null(caption)) "" else
+      sprintf("%s (cols %d–%d)", caption, min(idxs[[i]]), max(idxs[[i]]))
+  
+    subdf %>%
+      kable(
+        # preserve whatever format and options you were using
+        format       = "latex",      # or "html"
+        booktabs     = TRUE,
+        caption      = cap_i,
+        escape       = FALSE         # or TRUE, as you need
+      ) %>%
+      kable_styling(
+        latex_options = c("hold_position", "scale_down"),
+        full_width    = FALSE,
+        font_size     = 6           # or whatever you prefer
+      ) %>%
+      print()
+  }
+}
+
+tabyls <- function(df, row){
+  #df <- t(df)
+  
+  
+}
+
+
+
+```
+
+.
+mod_one <- lm(LN_SPPSF ~ ARTERIAL +
+                SINGLE_FAMILY1STORY + SINGLE_FAMILY2STORY + HALF_DUPLEX1STORY +
+                HALF_DUPLEX2STORY + TWO_PLUS_BATHS + POWDER_ROOM + SMALL + LARGE +
+                SMALLEST + LARGEST + QABOVE_AVG + QBELOW_AVG_POOR + LN_GARAGESPACES +
+                YB_PRE_1929 + YB_1946_TO_1960 + YB_POST_1961 + FIREPLACE +
+                HOT_WATER + ELEC_BASEBOARD + WALL + CENTRAL_AIR + CRAWL + SLAB +
+                GOOD + FAIR + POOR + VERY_POOR_UNSOUND + MONTHS_6TO22 + MONTHS_23TO30,
+               data = df)
+               
+               .
+               
+               
+ 
+ 
+ 
+ .
+ 
+ mod_olsr <- ols_step_backward_p(mod_one, prem = 0.05)
+
+# 2) Extract the final lm() from that object
+mod_ols <- mod_olsr$model
+
+# 3a) View the full summary (coefficients, R², etc.)
+summary(mod_ols)
+
+.
+
+When you run a pure backward‐elimination (either via base `step()` or `olsrr::ols_step_backward_p()`), any predictor whose p‐value exceeds your “POUT” threshold (.10 by SPSS’s default) will be dropped—even if SPSS happened to keep it (differences in the exact algorithm or data can lead to slightly different “last in/out” decisions).
+
+---
+
+### 1. Why MONTHS\_6TO22 and MONTHS\_23TO30 got dropped
+
+* **Different p‐values:** In your R fit, once other covariates were removed or re‐estimated, those two had p > 0.10, so the routine removed them.
+* **Algorithmic tweaks:** SPSS and R may handle tied p‐values, collinearities or ordering of removals slightly differently, so the “final” set can differ by one or two variables.
+
+---
+
+### 2. Forcing those variables to stay
+
+You can tell R’s `step()` that your *minimal* model must always include those two.  Use the **`scope`** argument with a **lower** bound:
+
+```r
+# 1) Fit the full model like before
+full_mod <- lm(
+  LN_SPPSF ~ ARTERIAL
+    + SINGLE_FAMILY1STORY + … + CRAWL + SLAB
+    + LN_GARAGESPACES + FIREPLACE
+    + HOT_WATER + CENTRAL_AIR
+    + MONTHS_6TO22 + MONTHS_23TO30,
+  data = df,
+  na.action = na.omit
+)
+
+# 2) Define your “must‐keep” lower model
+lower_mod <- lm(
+  LN_SPPSF ~ MONTHS_6TO22 + MONTHS_23TO30,
+  data = df, na.action = na.omit
+)
+
+# 3) Run backward with scope
+forced_mod <- step(
+  object    = full_mod,
+  scope     = list(lower = formula(lower_mod),
+                   upper = formula(full_mod)),
+  direction = "backward",
+  trace     = 1    # to see each variable dropped
+)
+
+# 4) Check that those months stayed in
+summary(forced_mod)$coefficients
+```
+
+Because `step()` won’t remove anything below your **lower** bound, `MONTHS_6TO22` and `MONTHS_23TO30` will survive the elimination loop.
+
+---
+
+### 3. If you’re using **olsrr::ols\_step\_backward\_p()**
+
+That function doesn’t directly support a “keep” list, so you have two choices:
+
+1. **Use base `step()` with `scope`** (as above).
+2. **After** your `ols_step_backward_p()` run, if those month variables aren’t in `step_mod$model`, you can re-fit the final model with them forced back in:
+
+   ```r
+   kept <- names(coef(step_mod$model))
+   forced_final <- lm(
+     reformulate(
+       response = "LN_SPPSF",
+       terms    = unique(c(kept, "MONTHS_6TO22", "MONTHS_23TO30"))
+     ),
+     data = df, na.action = na.omit
+   )
+   summary(forced_final)
+   ```
+
+---
+
+**Bottom line:** backward routines will drop any variable that doesn’t meet your removal criterion. To *guarantee* `MONTHS_6TO22` and `MONTHS_23TO30` stay, either
+
+* plug them into the **lower** formula of `step()`, or
+* manually re-add them in a final re-fit.
+
+.
+
+```{r}
+# 1. Read the .sav file
+df <- read_sav('../data/GrandmontECFsProjections_Data.sav') |> 
+  rename_with(toupper)
+
+# 2. (Optional) Convert labelled columns to factors or plain values
+#    e.g. df <- as_factor(df)    # turns labelled variables into R factors
+
+# 3. Write to .xlsx
+write_xlsx(df, "../data/GrandmontECFsProjections_Data_CLEAN.xlsx")
+```
+
+*
+
+df2 <- df |> 
+  distinct(MONTHS, .keep_all = TRUE)
+
+df3 <- data.frame(df2$MONTHS, df2$PRICE_INDEX)
+
+df3
+*
+
+final_data <- final_data %>%
+  mutate(
+    TAF           = END_INDEX / PRICE_INDEX#,
+    #TASP          = SALEPRICE * TAF,
+    #TASPPSF       = TASP / SRESB_FLOORAREA
+  )
+
+.
+
+final_model <- lm(LN_SPPSF ~ LNSBLDSFINT + LN_LANDRATIO + GARAGE + FIREPLACE +
+                    SINGLE_FAMILY1STORY + HALF_DUPLEX1STORY + HALF_DUPLEX2STORY +
+                    GOOD + FAIR + POOR + VERY_POOR_UNSOUND +
+                    YB_PRE_1929 + YB_1946_TO_1960 + YB_POST_1961 +
+                    CRAWL + SLAB + QABOVE_AVG + QBELOW_AVG_POOR +
+                    HOT_WATER + ELEC_BASEBOARD + WALL + CENTRAL_AIR + ARTERIAL +
+                    TWO_PLUS_BATHS + POWDER_ROOM +
+                    CLUSTER1 + CLUSTER2 + CLUSTER3 + CLUSTER4 + CLUSTER5 +
+                    CLUSTER6 + CLUSTER7 + CLUSTER8 + CLUSTER10 + MONTHS_6TO22 + MONTHS_23TO30,
+                  data = df_model_ready)
+                  
+.
+
+mod_one <- lm(LN_SPPSF ~ ARTERIAL + HOT_WATER + CENTRAL_AIR +
+                SINGLE_FAMILY1STORY + POWDER_ROOM + SMALL + LARGE +
+                SMALLEST + LARGEST  + QBELOW_AVG_POOR + LN_GARAGESPACES +
+                YB_PRE_1929 + YB_1946_TO_1960  + FIREPLACE +
+                GOOD + FAIR + POOR  + MONTHS_6TO22 + MONTHS_23TO30,
+               data = df, na.action = na.omit)
+
+.
+
+xgb_spec <- boost_tree(
+  trees = 1000,
+  tree_depth = tune(),
+  min_n = tune(),
+  loss_reduction = tune(),
+  sample_size = tune(),
+  mtry = tune(),
+  learn_rate = tune()
+) %>%
+  set_engine("xgboost") %>%
+  set_mode("regression")
+.
+
+lm(LN_SPPSF ~ LN_GARAGESPACES + FIREPLACE +
+                   SINGLE_FAMILY1STORY + HALF_DUPLEX1STORY + HALF_DUPLEX2STORY +
+                   GOOD + FAIR + POOR + VERY_POOR_UNSOUND + SMALL + LARGE +
+                   SMALLEST + LARGEST +
+                   YB_PRE_1929 + YB_1946_TO_1960 + YB_POST_1961 +
+                   CRAWL + SLAB + QABOVE_AVG + QBELOW_AVG_POOR +
+                   HOT_WATER + ELEC_BASEBOARD + WALL + CENTRAL_AIR + ARTERIAL +
+                   TWO_PLUS_BATHS + POWDER_ROOM + MONTHS_6TO22 + MONTHS_23TO30,
+               data = df) # na.action = na.exclude OR na.omit
+
+.
+predictors_A <- c("CRAWL","x2","x3")           # model A
+predictors_B <- c("CRAWL","x2","x3","x4","x5") # model B (e.g., larger set)
+
+# ---- build a shared split & folds (so models are compared fairly) ----
+keep_all <- intersect(names(df), unique(c(target, predictors_A, predictors_B)))
+stopifnot(target %in% keep_all)
+df_base  <- df[, keep_all, drop = FALSE]
+df_base  <- df_base[is.finite(df_base[[target]]), , drop = FALSE]
+
+split  <- initial_split(df_base, prop = 0.8, strata = !!sym(target))
+train  <- training(split)
+test   <- testing(split)
+folds  <- vfold_cv(train, v = 10, strata = !!sym(target))
+
+# ---- helper: fit + assess one linear model on the shared split ----
+assess_linear_on_split <- function(split, folds, predictors, normalize = TRUE) {
+  tr <- training(split)
+  te <- testing(split)
+
+  # Drop everything except the chosen predictors + outcome inside the recipe
+  drop_cols <- setdiff(names(tr), c(target, predictors))
+
+  rec <- recipe(as.formula(paste(target, "~ .")), data = tr) %>%
+    step_rm(all_of(drop_cols)) %>%
+    step_naomit(all_predictors(), all_outcomes()) %>%
+    step_zv(all_predictors()) %>%
+    step_dummy(all_nominal_predictors(), one_hot = TRUE) %>%
+    { if (normalize) step_normalize(., all_numeric_predictors()) else . }
+
+  spec <- linear_reg() %>% set_engine("lm")
+  wf   <- workflow() %>% add_model(spec) %>% add_recipe(rec)
+
+  # CV metrics
+  cv_fit <- fit_resamples(
+    wf, folds, metrics = metric_set(rmse, mae, rsq),
+    control = control_resamples(save_pred = TRUE)
+  )
+
+  # Train/Test metrics
+  last   <- last_fit(wf, split, metrics = metric_set(rmse, mae, rsq))
+
+  # Pull the trained lm() for diagnostics
+  lm_fit <- extract_fit_parsnip(last$.workflow[[1]])$fit
+
+  out <- list(
+    wf      = wf,
+    cv      = cv_fit,
+    last    = last,
+    lm_fit  = lm_fit,
+    coef    = tidy(lm_fit, conf.int = TRUE),
+    glance  = glance(lm_fit),                 # R^2, adj R^2, AIC, BIC, sigma, df, ...
+    bp      = tryCatch(lmtest::bptest(lm_fit), error = function(e) NULL),
+    shapiro = tryCatch(if (length(residuals(lm_fit)) <= 5000)
+                         shapiro.test(residuals(lm_fit)) else NULL,
+                       error = function(e) NULL),
+    vif     = tryCatch({
+                v <- car::vif(lm_fit)
+                tibble(term = names(v), vif = as.numeric(v))
+              }, error = function(e) NULL)
+  )
+  class(out) <- c("lm_assessment", class(out))
+  out
+}
+
+res_A <- assess_linear_on_split(split, folds, predictors_A, normalize = TRUE)
+res_B <- assess_linear_on_split(split, folds, predictors_B, normalize = TRUE)
+
+# ---- pretty tables: CV means/SEs, test metrics, coefficients, diagnostics ----
+tbl <- function(x, cap = NULL, digits = 4) {
+  knitr::kable(x, format = "latex", booktabs = TRUE, digits = digits, caption = cap) |>
+    kable_styling(latex_options = c("hold_position"))
+}
+
+# Cross-validated means
+cv_A <- collect_metrics(res_A$cv) |> dplyr::mutate(model = "Linear A")
+cv_B <- collect_metrics(res_B$cv) |> dplyr::mutate(model = "Linear B")
+cv_compare <- dplyr::bind_rows(cv_A, cv_B) |>
+  dplyr::select(model, .metric, mean, std_err) |>
+  tidyr::pivot_wider(names_from = model, values_from = c(mean, std_err))
+tbl(cv_compare, cap = "10-fold CV metrics (mean ± SE)")
+
+# Test-set metrics
+test_A <- collect_metrics(res_A$last) |> dplyr::mutate(model = "Linear A")
+test_B <- collect_metrics(res_B$last) |> dplyr::mutate(model = "Linear B")
+test_compare <- dplyr::bind_rows(test_A, test_B) |>
+  dplyr::select(model, .metric, .estimate) |>
+  tidyr::pivot_wider(names_from = model, values_from = .estimate)
+tbl(test_compare, cap = "Hold-out test metrics")
+
+# Coefficients (training fit inside last_fit)
+tbl(res_A$coef, cap = "Linear A: coefficients (95% CI)")
+tbl(res_B$coef, cap = "Linear B: coefficients (95% CI)")
+
+# Model-level diagnostics
+diag_A <- dplyr::tibble(
+  stat = c("R^2", "Adj R^2", "AIC", "BIC", "Sigma",
+           "Breusch–Pagan p", "Shapiro p (resid)"),
+  value = c(res_A$glance$r.squared,
+            res_A$glance$adj.r.squared,
+            res_A$glance$AIC,
+            res_A$glance$BIC,
+            res_A$glance$sigma,
+            if (!is.null(res_A$bp)) res_A$bp$p.value else NA_real_,
+            if (!is.null(res_A$shapiro)) res_A$shapiro$p.value else NA_real_)
+)
+diag_B <- dplyr::tibble(
+  stat = diag_A$stat,
+  value = c(res_B$glance$r.squared,
+            res_B$glance$adj.r.squared,
+            res_B$glance$AIC,
+            res_B$glance$BIC,
+            res_B$glance$sigma,
+            if (!is.null(res_B$bp)) res_B$bp$p.value else NA_real_,
+            if (!is.null(res_B$shapiro)) res_B$shapiro$p.value else NA_real_)
+)
+tbl(dplyr::bind_cols(model = "Linear A", diag_A), cap = "Diagnostics: Linear A")
+tbl(dplyr::bind_cols(model = "Linear B", diag_B), cap = "Diagnostics: Linear B")
+
+if (!is.null(res_A$vif)) tbl(res_A$vif, cap = "Linear A: VIF")
+if (!is.null(res_B$vif)) tbl(res_B$vif, cap = "Linear B: VIF")
+
+# ---- paired per-fold comparison (A vs B on identical folds) ----
+fold_A <- collect_metrics(res_A$cv, summarize = FALSE)
+fold_B <- collect_metrics(res_B$cv, summarize = FALSE)
+
+paired <- dplyr::left_join(
+  fold_A, fold_B,
+  by = c("id", ".metric", ".estimator"),
+  suffix = c("_A", "_B")
+) |>
+  dplyr::mutate(delta = .estimate_B - .estimate_A) |>
+  dplyr::select(id, .metric, delta)
+
+delta_summary <- paired |>
+  dplyr::group_by(.metric) |>
+  dplyr::summarise(mean_delta = mean(delta), sd_delta = sd(delta), .groups = "drop")
+tbl(delta_summary, cap = "Per-fold mean delta (Linear B − Linear A)")
+
+# Rough paired t-test on RMSE deltas (H0: mean delta = 0)
+if (any(paired$.metric == "rmse")) {
+  d_rmse <- paired$delta[paired$.metric == "rmse"]
+  print(t.test(d_rmse, mu = 0))
+}
+
+# ---- nested-model F-test (if one predictor set is a strict subset of the other) ----
+is_nested_AinB <- all(predictors_A %in% predictors_B)
+is_nested_BinA <- all(predictors_B %in% predictors_A)
+if (is_nested_AinB || is_nested_BinA) {
+  # Compare training fits from the same split
+  an <- if (is_nested_AinB) anova(res_A$lm_fit, res_B$lm_fit) else anova(res_B$lm_fit, res_A$lm_fit)
+  print(an)
+}
+
+# ---- simple plots for the PDF (test set) ----
+lmA_pred <- collect_predictions(res_A$last) |> dplyr::mutate(model = "Linear A")
+lmB_pred <- collect_predictions(res_B$last) |> dplyr::mutate(model = "Linear B")
+pred_both <- dplyr::bind_rows(lmA_pred, lmB_pred) |>
+  dplyr::mutate(resid = !!sym(target) - .pred)
+
+# Observed vs Predicted
+ggplot(pred_both, aes(x = .pred, y = !!sym(target), color = model)) +
+  geom_point(alpha = 0.7) +
+  geom_abline(slope = 1, intercept = 0, linetype = 2) +
+  facet_wrap(~ model) +
+  labs(title = "Hold-out: Predicted vs Observed", x = "Predicted", y = "Observed") +
+  theme_minimal() + theme(legend.position = "none")
+
+# Residuals vs Fitted
+ggplot(pred_both, aes(x = .pred, y = resid, color = model)) +
+  geom_hline(yintercept = 0, linetype = 2) +
+  geom_point(alpha = 0.7) +
+  facet_wrap(~ model) +
+  labs(title = "Hold-out Residuals vs Fitted", x = "Fitted", y = "Residual") +
+  theme_minimal() + theme(legend.position = "none")
+
+
+.
+nrmse_sd_vec <- function(truth, estimate) {
+  sd_y <- stats::sd(truth, na.rm = TRUE)
+  rmse <- yardstick::rmse_vec(truth, estimate)
+  100 * (rmse / sd_y)
+}
+
+.
+
+
+    MONTHS_1TO9   = case_when(MONTHS <= 9  ~ MONTHS, TRUE ~ 9),
+    MONTHS_10TO16 = case_when(MONTHS <= 9  ~ 0, MONTHS <= 16 ~ MONTHS - 9, TRUE ~ 7),
+    MONTHS_17TO24 = case_when(MONTHS <= 16 ~ 0, TRUE ~ MONTHS - 16),
+.
+library(dplyr)
+library(gt)
+library(rlang)
+
+gt_highlight_matches <- function(data,
+                                 col_a, col_b,
+                                 n = 10,
+                                 highlight = "#fff3bf",
+                                 na_matches = c("never", "both")) {
+  na_matches <- match.arg(na_matches)
+  ca <- ensym(col_a); cb <- ensym(col_b)
+
+  d <- data %>%
+    slice_head(n = n) %>%
+    mutate(
+      .match_row = if (na_matches == "both") {
+        (is.na(!!ca) & is.na(!!cb)) | (!is.na(!!ca) & !is.na(!!cb) & (!!ca == !!cb))
+      } else {
+        !is.na(!!ca) & !is.na(!!cb) & (!!ca == !!cb)
+      }
+    )
+
+  gt_tbl <- d %>%
+    gt() %>%
+    # highlight col_a cells where the row matches
+    tab_style(
+      style = list(cell_fill(color = highlight), cell_text(weight = "bold")),
+      locations = cells_body(columns = !!ca, rows = .match_row)
+    ) %>%
+    # highlight col_b cells where the row matches
+    tab_style(
+      style = list(cell_fill(color = highlight), cell_text(weight = "bold")),
+      locations = cells_body(columns = !!cb, rows = .match_row)
+    ) %>%
+    cols_hide(.match_row)
+
+  gt_tbl
+}
+
+
+# cold <- c('SALEDATE.x', 'SALEPRICE.x', 'SCOND.x', 'SALEDATE.y', 'SALEPRICE.y', 'SCOND.y')
+
+.
+
+.
+plot_lm_pvalues_two <- function(mod1, mod2, labels = c("Model 1", "Model 2"),
+                                drop_intercept = TRUE, digits = 3, alpha_line = 0.05,
+                                show_sidebar_labels = TRUE,
+                                sidebar_space_mult = 0.35,  # how much right space to reserve
+                                dodge_width = 0.5) { #labels next to dots: show_labels = TRUE
+  acc <- 10^(-digits)
+  eps <- 1e-16
+  td1 <- broom::tidy(mod1) %>% mutate(.model = labels[1])
+  td2 <- broom::tidy(mod2) %>% mutate(.model = labels[2])
+  df <- bind_rows(td1, td2)
+
+  if (drop_intercept) df <- df %>% filter(term != "(Intercept)")
+  
+  df <- df %>%    # clamp tiny p for log scale; build formatted label
+    mutate(
+      p_clamp   = pmax(p.value, eps),
+      label_fmt = scales::number(p.value, accuracy = acc)
+    )
+
+  # order terms by the smallest p across models so rows are comparable
+  order_df <- df %>%
+    group_by(term) %>%
+    summarise(p_min = min(p_clamp, na.rm = TRUE), .groups = "drop")
+
+  df <- df %>%
+    left_join(order_df, by = "term") %>%
+    mutate(term_ord = forcats::fct_reorder(term, p_min, .desc = TRUE)) # least sig at top
+  
+  pd <- position_dodge(dodge_width)    # dodge so two model points don’t overlap
+  
+  max_p <- max(df$p_clamp, na.rm = TRUE) # Where to place the sidebar labels (a fixed large x)
+  label_x <- max_p * 10  # any factor > 1 works on log scale; we'll create space with expand
+
+  p <- ggplot(df, aes(x = p_clamp, y = term_ord, colour = .model)) +
+    geom_point(size = 3, position = pd) +
+    geom_vline(xintercept = alpha_line, linetype = "dashed", colour = "red") +
+    scale_x_log10(name = "P-Value (log scale)",
+                  expand = expansion(mult = c(0.02, sidebar_space_mult))) +
+    labs(
+      title = "Predictor p-values by model", y = "Predictor", colour = "Model"
+    ) + theme_minimal() + coord_cartesian(clip = "off") + # allow text into the right margin
+    theme(plot.margin = margin(t = 5, r = 20, b = 5, l = 5, unit = "pt")) # bit of right margin
+
+  if (show_sidebar_labels) {# Add 2 label columns (1 per model), positioned at a fixed large x
+    lab_df <- df %>% mutate(x_for_label = label_x)
+
+    p <- p +
+      geom_text(data = lab_df,
+                aes(x = x_for_label, y = term_ord, label = label_fmt, colour = .model),
+                hjust = 0, size = 2.6, position = pd, inherit.aes = FALSE)
+  }
+  p
+}
+.
+plot_lm_pvalues_two_side <- function(mod1, mod2,
+                                     labels = c("Model 1", "Model 2"),
+                                     title = "Model",
+                                     drop_intercept = TRUE,
+                                     digits = 3,
+                                     alpha_line = 0.05,
+                                     show_sidebar_labels = TRUE,
+                                     label_style = c("decimal","scientific"),
+                                     format_axis_scientific = TRUE,   # tick labels
+                                     dodge_width = 0.5,
+                                     sidebar_hjust = -0.1,
+                                     right_margin_pts = 90,
+                                     legend_nudge_pts = 10) {
+
+  label_style <- match.arg(label_style)
+  acc <- 10^(-digits)
+  eps <- 1e-16
+
+  td1 <- broom::tidy(mod1) %>% mutate(.model = labels[1])
+  td2 <- broom::tidy(mod2) %>% mutate(.model = labels[2])
+  df  <- bind_rows(td1, td2)
+
+  if (drop_intercept) df <- df %>% filter(term != "(Intercept)")
+
+  # choose a label formatter
+  lbl_fun <- if (label_style == "scientific") {
+    scales::label_scientific(digits = digits)
+  } else {
+    function(x) scales::number(x, accuracy = acc)
+  }
+
+  df <- df %>%
+    mutate(
+      p_clamp   = pmax(p.value, eps),
+      label_fmt = lbl_fun(p.value)
+    )
+
+  # order rows by smallest p across models
+  order_df <- df %>%
+    group_by(term) %>%
+    summarise(p_min = min(p_clamp, na.rm = TRUE), .groups = "drop")
+
+  df <- df %>%
+    left_join(order_df, by = "term") %>%
+    mutate(term_ord = forcats::fct_reorder(term, p_min, .desc = TRUE))
+
+  pd <- position_dodge(width = dodge_width)
+
+  p <- ggplot(df, aes(x = p_clamp, y = term_ord, colour = .model)) +
+    geom_point(size = 3, position = pd) +
+    geom_vline(xintercept = alpha_line, linetype = "dashed", colour = "red") +
+    scale_x_log10(
+      name = "P-Value (log scale)",
+      labels = if (format_axis_scientific) scales::label_scientific() else waiver()
+    ) +
+    labs(title = title, y = "Predictor", colour = "Model") +
+    theme_minimal() +
+    coord_cartesian(clip = "off") +
+    theme(
+      plot.margin = margin(t = 5, r = right_margin_pts, b = 5, l = 5, unit = "pt"),
+      legend.box.margin = margin(l = legend_nudge_pts, unit = "pt")
+    )
+
+  if (show_sidebar_labels) {
+    p <- p + geom_text(
+      data = df,
+      aes(x = Inf, y = term_ord, label = label_fmt, colour = .model),
+      hjust = sidebar_hjust, size = 2.6, position = pd, inherit.aes = FALSE
+    )
+  }
+
+  p
+}
+.
+```{r, eval = FALSE}
+"MONTHS_9TO24" %in% names(A)                  # should be TRUE
+grep("MONTHS", names(A), value = TRUE)       # see actual spelling/case
+which(names(A) == "MONTHS_9TO24")             # exact match?
+
+```
+.
+```{r mod_make_1, eval = FALSE}
+full_model_A <- lm(LN_SPPSF ~ ARTERIAL + CRAWL + SLAB +    
+                   SINGLE_FAMILY1STORY + SINGLE_FAMILY2STORY +
+                   HALF_DUPLEX1STORY + HALF_DUPLEX2STORY +
+                   SMALLEST + SMALL + LARGE + LARGEST + 
+                   TWO_PLUS_BATHS + POWDER_ROOM + LN_GARAGESPACES + FIREPLACE +
+                   GOOD + FAIR + POOR + VERY_POOR_UNSOUND + 
+                   QABOVE_AVG + QBELOW_AVG + 
+                   YB_PRE_1929 + YB_1930_TO_1945 + YB_1946_TO_1960 + YB_POST_1961 +
+                   HOT_WATER + ELEC_BASEBOARD + WALL + CENTRAL_AIR +
+                   MONTHS_1TO8 + MONTHS_9TO24,
+                 data = A, na.action = na.omit)
+
+f1A <- formula(full_model_A) 
+
+# rows_use1A <- as.integer(rownames(model.frame(f1A, data = A, na.action = na.omit)))
+
+mfA <- model.frame(full_model_A)       # already evaluated; no need to pass data
+rows_use1A <- as.integer(rownames(mfA))
+df_step1A  <- df[rows_use1A, , drop = FALSE]
+
+full_locked1A <- lm(f1A, data = df_step1A, na.action = na.omit)
+
+backward_model_1A <- stats::step(
+  full_locked1A,
+  direction = "backward",   
+  trace = 0   
+)
+
+full_model_B <- lm(LN_SPPSF ~ ARTERIAL + CRAWL + SLAB +    # lm() is used to fit linear models
+                   SINGLE_FAMILY1STORY + SINGLE_FAMILY2STORY +
+                   HALF_DUPLEX1STORY + HALF_DUPLEX2STORY +
+                   SMALLEST + SMALL + LARGE + LARGEST + #S_AVG +
+                   TWO_PLUS_BATHS + POWDER_ROOM + LN_GARAGESPACES + FIREPLACE +
+                   GOOD + FAIR + POOR + VERY_POOR_UNSOUND + #AVG + 
+                   QABOVE_AVG + QBELOW_AVG + #Q_AVG +
+                   YB_PRE_1929 + YB_1930_TO_1945 + YB_1946_TO_1960 + YB_POST_1961 +
+                   HOT_WATER + ELEC_BASEBOARD + WALL + CENTRAL_AIR +
+                   MONTHS_1TO8 + MONTHS_9TO24,
+                 data = B, na.action = na.omit)
+
+# 1) Take the exact formula from your full model
+f1B <- formula(full_model_B) # formula() extracts formulae which have been included in other objects
+
+# 2) Lock the row set to those complete for **all terms in f**
+#rows_use1B <- as.integer(rownames(model.frame(f1B, data = B, na.action = na.omit)))
+# as.integer() Creates or tests for objects of type "integer".
+mfB <- model.frame(full_model_B)       # already evaluated; no need to pass data
+rows_use1B <- as.integer(rownames(mfB))
+df_step1B  <- df[rows_use1B, , drop = FALSE]
+
+# (optional) sanity # length(rows_use)
+
+# 3) Refit on the locked data, then step()
+full_locked1B <- lm(f1B, data = df_step1B, na.action = na.omit)
+
+backward_model_1B <- stats::step(
+  # step() is IN the stats package, Selects a formula-based model by AIC
+  full_locked1B,
+  direction = "backward",    # direction indicates the mode of stepwise search
+  trace = 0    # trace indicates verbose output
+)
+
+
+
+```
+.
+```{r}
+renv::dependencies()
+```
+.
+
+.
+
+.
+
+.
+
+.
+
+.
+
+.

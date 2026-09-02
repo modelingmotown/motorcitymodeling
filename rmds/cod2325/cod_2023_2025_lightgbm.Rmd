@@ -1,0 +1,585 @@
+---
+title: "COD 23-25 LightGBM"
+author: |
+  | Elliot Dean  
+  | Office of the Chief Financial Officer | Office of the Assessor
+  | City of Detroit
+date: "`r sub('^0', '', format(Sys.Date(), '%d %B %Y'))`"
+geometry: margin = 1.5cm
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, error = FALSE)
+```
+
+## Load Necessary Libraries
+
+```{r lib_load}
+library(tidyverse)   # data wrangling & ggplot2
+library(magrittr)
+library(janitor)
+library(kableExtra)  # Create unique tables
+library(caret)       # train/test split, cross‐validation
+library(broom)       # tidy model output
+library(car)         # VIF, Durbin‐Watson
+library(lmtest)      # Breusch–Pagan test
+library(tidymodels)  # collection of packages for modeling and machine learning
+library(xgboost)     # Extreme Gradient Boosting
+library(bundle)      # Serialize Model Objects with a Consistent Interface
+library(data.table)  # fast I/O + data handling
+library(lightgbm)    # LightGBM R package
+library(pROC)        # AUC
+library(here)        # Find files within a project
+library(Matrix)      # sparse matrices play nicely with one-hot encoding
+library(diffdf)      # tools for working with data frame difference
+```
+
+```{r data_import1, eval=FALSE}
+# ---- 1. Load data & normalize names ----
+DATA_PATH <- read_csv(here("data/city", "salesSFapr2023toMarch2025Updated.csv")) |>
+  rename_with(tolower)    # clean_names()
+
+OUT_DIR   <- here("models/codmods")
+```
+
+---
+
+## Load Data
+
+```{r dataload}
+load(file = here("data/rdata", "CODsalesSFapr2023Mar2025.RData"))
+
+OUT_DIR   <- here("models/codmods")
+```
+
+```{r setup1}
+set.seed(42)
+
+# ---------------------------
+# Core: build design matrix from formula
+# ---------------------------
+# This is the key AVM-ish piece:
+# - formula defines predictors
+# - model.matrix makes your X
+# - terms + xlevels are saved for consistent future encodes
+#
+make_design <- function(df,
+                        formula,
+                        terms_obj = NULL,
+                        xlevels = NULL,
+                        handle_new_levels = c("na", "drop", "error")) {
+
+  handle_new_levels <- match.arg(handle_new_levels)
+
+  # lock terms (training or reuse at inference)
+  if (is.null(terms_obj)) {
+    terms_obj <- terms(formula, data = df)
+  }
+
+  # --- CRITICAL: pre-sanitize factor columns BEFORE model.frame(xlev=...) ---
+  # If we're using saved xlevels (test/inference), make sure df's factor columns
+  # cannot contain unseen levels, otherwise model.frame will error immediately.
+  if (!is.null(xlevels)) {
+    fac_vars <- intersect(names(xlevels), names(df))
+
+    for (v in fac_vars) {
+      # Work on a temporary vector so we don't mutate df unexpectedly unless needed
+      col <- df[[v]]
+
+      # Ensure it's character so we can safely compare levels/values
+      if (is.factor(col)) col_chr <- as.character(col) else col_chr <- col
+
+      # Only process if it’s character/factor-like (ignore numeric-coded cats)
+      if (is.character(col_chr)) {
+        unseen <- !is.na(col_chr) & !(col_chr %in% xlevels[[v]])
+
+        if (any(unseen)) {
+          new_vals <- unique(col_chr[unseen])
+
+          if (handle_new_levels == "error") {
+            stop(sprintf(
+              "New factor levels found in '%s': %s",
+              v, paste(new_vals, collapse = ", ")
+            ))
+          }
+
+          if (handle_new_levels == "drop") {
+            # drop offending rows
+            df <- df[!unseen, , drop = FALSE]
+            # need to update col_chr after dropping
+            col_chr <- df[[v]]
+            if (is.factor(col_chr)) col_chr <- as.character(col_chr)
+          } else if (handle_new_levels == "na") {
+            # convert unseen to NA (LightGBM handles missing well)
+            col_chr[unseen] <- NA_character_
+          }
+        }
+
+        # Now lock factor levels to training levels
+        df[[v]] <- factor(col_chr, levels = xlevels[[v]])
+      }
+    }
+  }
+
+  # Build model.frame using locked terms (now safe with xlev)
+  mf <- model.frame(terms_obj, data = df, na.action = na.pass, xlev = xlevels)
+
+  # Capture xlevels during training
+  if (is.null(xlevels)) {
+    xlevels <- .getXlevels(terms_obj, mf)
+  }
+
+  # Response (if present)
+  y <- model.response(mf)
+
+  # Sparse one-hot design matrix
+  X <- Matrix::sparse.model.matrix(terms_obj, mf)
+
+  # Drop intercept if present
+  if ("(Intercept)" %in% colnames(X)) {
+    X <- X[, setdiff(colnames(X), "(Intercept)"), drop = FALSE]
+  }
+
+  list(
+    X = X,
+    y = y,
+    terms = terms_obj,
+    xlevels = xlevels,
+    feature_names = colnames(X)
+  )
+}
+
+# --- helper: set LightGBM feature names compatibly ---
+set_lgb_feature_names <- function(dset, feature_names) {
+  # Many builds support setting fields
+  if (exists("lgb.Dataset.set.field", where = asNamespace("lightgbm"), inherits = FALSE)) {
+    lightgbm::lgb.Dataset.set.field(dset, field_name = "feature_name", data = feature_names)
+  }
+  dset
+}
+```
+
+```{r set2}
+# ---------------------------
+# Metrics (regression)
+# ---------------------------
+rmse <- function(y, yhat) sqrt(mean((y - yhat)^2, na.rm = TRUE))
+mae  <- function(y, yhat) mean(abs(y - yhat), na.rm = TRUE)
+r2   <- function(y, yhat) {
+  ss_res <- sum((y - yhat)^2, na.rm = TRUE)
+  ss_tot <- sum((y - mean(y, na.rm = TRUE))^2, na.rm = TRUE)
+  1 - ss_res/ss_tot
+}
+
+# ---------------------------
+# Train function (AVM regression)
+# ---------------------------
+train_lgbm_avm <- function(df, formula, test_frac = 0.2, handle_new_levels = "na",
+                           params = list(
+                             objective = "regression", metric = "rmse", learning_rate = 0.05,
+                             num_leaves = 256, feature_fraction = 1, bagging_fraction = 1,
+                             # numleaves=64 feature_fraction = 0.85 bagging_fraction = 0.85
+                             bagging_freq = 1, min_data_in_leaf = 10, verbosity = -1 #dataleaf = 50
+                           ), num_boost_round = 10000, early_stopping_rounds = 200) {
+                              # num_boost_round = 5000 early_stopping_rounds = 100
+
+  # Basic NA strategy:  # keep NAs in predictors; model.matrix will keep NA rows,
+  # and LightGBM can handle missing values.  # But response must not be NA.
+  resp_name <- all.vars(formula)[1]
+  df <- df[!is.na(df[[resp_name]]), ]
+
+  # Split
+  n <- nrow(df)            # or df[, .N]
+  idx_test  <- sample.int(n, size = floor(test_frac * n))
+  idx_train <- setdiff(seq_len(n), idx_test)
+  train_df <- df[idx_train, ] 
+  test_df  <- df[idx_test, ]
+
+  # Build train design (captures terms + xlevels)
+  tr <- make_design(train_df, formula, handle_new_levels = handle_new_levels)
+
+  # Build test design using locked terms + xlevels
+  te <- make_design(test_df, formula, terms_obj = tr$terms,
+                    xlevels = tr$xlevels, handle_new_levels = handle_new_levels)
+
+  # Ensure feature alignment (model.matrix guarantees order if terms identical,
+  # but we assert to be safe)
+  if (!identical(tr$feature_names, te$feature_names)) {
+    # Align test columns to train columns (in case of dropped rows or subtle diffs)
+    # Add missing cols in test, drop extra cols.
+    missing <- setdiff(tr$feature_names, te$feature_names)
+    extra   <- setdiff(te$feature_names, tr$feature_names)
+
+    if (length(missing) > 0) {
+      add <- Matrix::Matrix(0, nrow = nrow(te$X), ncol = length(missing), sparse = TRUE)
+      colnames(add) <- missing
+      te$X <- cbind(te$X, add)
+    }
+    if (length(extra) > 0) {
+      te$X <- te$X[, setdiff(colnames(te$X), extra), drop = FALSE]
+    }
+    # Reorder to match train
+    te$X <- te$X[, tr$feature_names, drop = FALSE]
+    te$feature_names <- colnames(te$X)
+  }
+
+  dtrain <- lgb.Dataset(data = tr$X, label = tr$y)
+  dvalid <- lgb.Dataset(data = te$X, label = te$y)
+  
+  # ensure column names exist (important for importance tables)
+  colnames(tr$X) <- tr$feature_names
+  colnames(te$X) <- tr$feature_names
+
+  # set names on datasets (safe no-op if not supported)
+  dtrain <- set_lgb_feature_names(dtrain, tr$feature_names)
+  dvalid <- set_lgb_feature_names(dvalid, tr$feature_names)
+
+  booster <- lgb.train(
+    params = params,  data = dtrain, nrounds = num_boost_round, valids = list(valid = dvalid),
+    early_stopping_rounds = early_stopping_rounds, eval_freq = 50
+  )
+
+  pred_test <- predict(booster, te$X)
+
+  metrics <- list(
+    rmse = rmse(te$y, pred_test), mae = mae(te$y, pred_test), r2 = r2(te$y, pred_test)
+  )
+
+  importance <- lgb.importance(booster, percentage = TRUE)
+
+  list(
+    booster = booster,  formula = formula, terms = tr$terms, xlevels = tr$xlevels,
+    feature_names = tr$feature_names, metrics = metrics, importance = importance
+  )
+}
+```
+
+
+```{r savemod, eval=FALSE}
+# ---------------------------
+# Save bundle (model + encoding contract)
+# ---------------------------
+save_avm_bundle <- function(fit, prefix = "lgbm_avm") {
+  ts <- stamp()
+  model_file <- file.path(OUT_DIR, sprintf("%s_%s.txt", prefix, ts))
+  bundle_file <- file.path(OUT_DIR, sprintf("%s_%s_bundle.rds", prefix, ts))
+  imp_file <- file.path(OUT_DIR, sprintf("%s_%s_importance.csv", prefix, ts))
+
+  lgb.save(fit$booster, model_file)
+
+  bundle <- list(
+    model_file = model_file,
+    formula = fit$formula,
+    terms = fit$terms,
+    xlevels = fit$xlevels,
+    feature_names = fit$feature_names,
+    best_iter = fit$booster$best_iter
+  )
+  saveRDS(bundle, bundle_file)
+
+  fwrite(fit$importance, imp_file)
+
+  list(model_file = model_file, bundle_file = bundle_file, imp_file = imp_file)
+}
+```
+
+
+
+```{r predict, eval=FALSE}
+# ---------------------------
+# Predict helper (safe inference)
+# ---------------------------
+# Provide df_new (one row or many); uses saved terms/xlevels to build X in same feature space
+predict_avm <- function(bundle_rds, df_new, handle_new_levels = "na") {
+  bundle <- readRDS(bundle_rds)
+  booster <- lgb.load(bundle$model_file)
+
+  des <- make_design(df_new, bundle$formula,
+                     terms_obj = bundle$terms,
+                     xlevels = bundle$xlevels,
+                     handle_new_levels = handle_new_levels)
+
+  # Align columns to training feature set
+  X <- des$X
+  if (!identical(colnames(X), bundle$feature_names)) {
+    missing <- setdiff(bundle$feature_names, colnames(X))
+    extra   <- setdiff(colnames(X), bundle$feature_names)
+
+    if (length(missing) > 0) {
+      add <- Matrix::Matrix(0, nrow = nrow(X), ncol = length(missing), sparse = TRUE)
+      colnames(add) <- missing
+      X <- cbind(X, add)
+    }
+    if (length(extra) > 0) {
+      X <- X[, setdiff(colnames(X), extra), drop = FALSE]
+    }
+    X <- X[, bundle$feature_names, drop = FALSE]
+  }
+
+  predict(booster, X)
+}
+```
+
+
+```{r dhelp, eval=FALSE}
+# ---------------------------
+# Optional: AVM-ish "newdata_from_sale" helper
+# ---------------------------
+# Given a full df, pull one record by an id and return the row as newdata for predict_avm()
+newdata_from_id <- function(df, id_col, id_value) {
+  stopifnot(id_col %in% names(df))
+  row <- df[get(id_col) == id_value]
+  if (nrow(row) == 0) stop("No rows found for that id.")
+  row
+}
+
+```
+
+---
+
+## Model I
+
+```{r mod1}
+# ==========================================================
+# MAIN EXAMPLE (edit this to match your AVM variables)
+# ==========================================================
+# message("Reading data: ", DATA_PATH)
+# df <- fread(DATA_PATH)
+df <- dfa
+
+# Example AVM formula: # - choose EXACTLY the variables you want
+# - you can include factor() for categorical predictors
+# - you can do transforms inside formula (log, poly, interactions, etc.)
+#
+# Typical price AVM:
+#   ln_price ~ living_area + lot_area + beds + baths + year_built + factor(ecf) + factor(zip) + dist_downtown
+#
+# If you train on price directly: #   sale_price ~ ...
+#
+formula_time <- ln_sppsf ~ arterial + single_family1story + half_duplex1story + half_duplex2story +
+  smallest + small + large + largest + two_plus_baths + powder_room +
+  good + fair + poor + very_poor_unsound + qabove_avg + qbelow_avg +
+  sresb_yearbuilt + crawl + slab + ln_garagespaces +
+  fireplace + hot_water + elec_baseboard + wall + central_air + months
+
+message("Training LightGBM AVM with formula-driven features...")
+mod_time <- train_lgbm_avm(df, formula = formula_time)
+
+message("\nHoldout metrics:")
+print(mod_time$metrics)
+
+message("\nTop 20 features by Gain:")
+print(head(mod_time$importance[order(-Gain)], 20))
+
+# art <- save_avm_bundle(fit)
+# message("\nSaved artifacts:")
+# print(art)
+```
+
+---
+
+## Model II
+
+```{r mod2}
+formula_ln_price_no_ecf <- ln_price ~
+  ln_landratio + ln_base_bldgsize_ratio +
+  arterial + single_family1story + half_duplex1story + half_duplex2story +
+  smallest + small + large + largest + two_plus_baths + powder_room +
+  good + fair + poor + very_poor_unsound + qabove_avg + qbelow_avg +
+  sresb_yearbuilt + crawl + slab + ln_garagespaces +
+  fireplace + hot_water + elec_baseboard + wall + central_air + months
+
+message("Training LightGBM AVM with formula-driven features...")
+mod_ln_price_no_ecf <- train_lgbm_avm(df, formula = formula_ln_price_no_ecf)
+
+message("\nHoldout metrics:")
+print(mod_ln_price_no_ecf$metrics)
+
+message("\nTop 20 features by Gain:")
+print(head(mod_ln_price_no_ecf$importance[order(-Gain)], 20))
+
+# art <- save_avm_bundle(fit)
+# message("\nSaved artifacts:")
+# print(art)
+```
+
+---
+
+## Model III
+
+```{r mod3}
+formula_base <- ln_price ~
+  ln_landratio + ln_base_bldgsize_ratio + arterial +
+  single_family1story + half_duplex1story + half_duplex2story + smallest + small + large + largest +
+  two_plus_baths + powder_room + good + fair + poor + very_poor_unsound +
+  qabove_avg + qbelow_avg + sresb_yearbuilt + crawl + slab + ln_garagespaces +
+  fireplace + hot_water + elec_baseboard + wall + central_air + months + ecf
+
+message("Training LightGBM AVM with formula-driven features...")
+mod_base <- train_lgbm_avm(df, formula = formula_base)
+
+message("\nHoldout metrics:")
+print(mod_base$metrics)
+
+message("\nTop 20 features by Gain:")
+print(head(mod_base$importance[order(-Gain)], 20))
+
+# art <- save_avm_bundle(fit)
+# message("\nSaved artifacts:")
+# print(art)
+```
+
+---
+
+## Model IV
+
+```{r mod4}
+formula_ln_tasp <- ln_tasp_re ~
+  ln_landratio + ln_base_bldgsize_ratio + arterial +
+  single_family1story + half_duplex1story + half_duplex2story +
+  smallest + small + large + largest + two_plus_baths + powder_room +
+  good + fair + poor + very_poor_unsound + qabove_avg + qbelow_avg +
+  sresb_yearbuilt + crawl + slab + ln_garagespaces +
+  fireplace + hot_water + elec_baseboard + wall + central_air + months + ecf
+
+message("Training LightGBM AVM with formula-driven features...")
+mod_tasp <- train_lgbm_avm(df, formula = formula_ln_tasp)
+
+message("\nHoldout metrics:")
+print(mod_tasp$metrics)
+
+message("\nTop 20 features by Gain:")
+print(head(mod_tasp$importance[order(-Gain)], 20))
+
+# art <- save_avm_bundle(fit)
+# message("\nSaved artifacts:")
+# print(art)
+```
+
+---
+
+## Model V
+
+```{r mod5}
+formula_alt <- ln_tasp_re ~
+  ln_landratio + lnsbldsfint + arterial + single_family1story + half_duplex1story +
+  half_duplex2story + smallest + small + large + largest +  two_plus_baths + powder_room +
+  good + fair + poor + very_poor_unsound + qabove_avg + qbelow_avg +
+  sresb_yearbuilt + crawl + slab +  garage + fireplace +
+  hot_water + elec_baseboard + wall + central_air + months + ecf
+
+message("Training LightGBM AVM with formula-driven features...")
+mod_alt <- train_lgbm_avm(df, formula = formula_alt)
+
+message("\nHoldout metrics:")
+print(mod_alt$metrics)
+
+message("\nTop 20 features by Gain:")
+print(head(mod_alt$importance[order(-Gain)], 20))
+
+# art <- save_avm_bundle(fit)
+# message("\nSaved artifacts:")
+# print(art)
+```
+
+---
+
+## Model VI
+
+```{r mod6}
+formula_alt2 <- ln_tasp_re ~
+  ln_landratio + lnsbldsfint + arterial + single_family1story + half_duplex1story +
+  half_duplex2story + smallest + small + large + largest +  two_plus_baths + powder_room +
+  good + fair + poor + very_poor_unsound + qabove_avg + qbelow_avg +
+  sresb_yearbuilt + crawl + slab +  garage + fireplace +
+  hot_water + elec_baseboard + wall + central_air + ecf
+
+message("Training LightGBM AVM with formula-driven features...")
+mod_alt2 <- train_lgbm_avm(df, formula = formula_alt2)
+
+message("\nHoldout metrics:")
+print(mod_alt2$metrics)
+
+message("\nTop 20 features by Gain:")
+print(head(mod_alt2$importance[order(-Gain)], 20))
+
+# art <- save_avm_bundle(fit)
+# message("\nSaved artifacts:")
+# print(art)
+```
+
+```{r example, eval=FALSE}
+# ---------------------------
+# Example prediction on a single sale/parcel
+# ---------------------------
+# Suppose your df has sale_id or parcelno:
+# new_row <- newdata_from_id(df, "sale_id", 123456)
+# yhat <- predict_avm(art$bundle_file, new_row)
+# print(yhat)
+```
+
+
+```{r dfcheck, eval=FALSE}
+# diffdf(df22, df23)
+count_prefix <- function(df, prefix) sum(startsWith(names(df), prefix))
+
+c(
+  total_cols = ncol(df_prepped),
+  ecf_dummies = count_prefix(df_prepped, "ecf_")
+)
+
+c(
+  total_cols = ncol(df_prepped2),
+  ecf_dummies = count_prefix(df_prepped2, "ecf_")
+)
+```
+
+
+```{r}
+compare_feature_sets <- function(df_a, df_b, prefix_ecf = "ecf_") {
+  a <- names(df_a)
+  b <- names(df_b)
+
+  a_ecf <- a[startsWith(a, prefix_ecf)]
+  b_ecf <- b[startsWith(b, prefix_ecf)]
+
+  a_non <- setdiff(a, a_ecf)
+  b_non <- setdiff(b, b_ecf)
+
+  list(
+    counts = data.frame(
+      set = c("A", "B"),
+      total_cols = c(length(a), length(b)),
+      ecf_dummies = c(length(a_ecf), length(b_ecf)),
+      non_ecf_cols = c(length(a_non), length(b_non))
+    ),
+    missing_in_B_non_ecf = setdiff(a_non, b_non),
+    missing_in_A_non_ecf = setdiff(b_non, a_non),
+    missing_in_B_ecf = setdiff(a_ecf, b_ecf),
+    missing_in_A_ecf = setdiff(b_ecf, a_ecf)
+  )
+}
+
+cmp <- compare_feature_sets(df_prepped2, df_prepped)
+
+cmp$counts
+head(cmp$missing_in_B_non_ecf, 50)   # columns present in 23–25 but missing in 22–24
+head(cmp$missing_in_A_non_ecf, 50)   # columns present in 22–24 but missing in 23–25
+```
+
+```{r}
+missing_22 <- setdiff(names(df_prepped2), names(df_prepped))
+missing_22_non_ecf <- missing_22[!startsWith(missing_22, "ecf_")]
+
+head(missing_22_non_ecf, 80)
+length(missing_22_non_ecf)
+```
+
+
+
+
+

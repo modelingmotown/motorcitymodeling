@@ -1,0 +1,592 @@
+---
+title: "Detroit 2023 - 2025 Model I"
+author: |
+  | Elliot Dean  
+  | Office of the Chief Financial Officer | Office of the Assessor
+  | City of Detroit
+date: "`r sub('^0', '', format(Sys.Date(), '%d %B %Y'))`"
+geometry: margin = 1.5cm
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+    template: ./aux/template_1.tex
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, error = FALSE)
+```
+
+## Load Necessary Libraries
+
+```{r lib_load}
+library(tidyverse)   # data wrangling & ggplot2
+library(janitor)     # functions for examining and cleaning dirty data
+library(here)        # Find files within a project
+library(car)         # vif()
+library(lmtest)      # Breusch–Pagan test
+library(ggpubr)      # Automatically print the regression equation for ggplot
+library(spgwr)       # Functions for computing geographically weighted regressions
+library(tidymodels)  # collection of packages for modeling and machine learning
+library(finetune)    # enhances the 'tune' package by providing more specialized methods
+library(xgboost)     # Extreme Gradient Boosting
+library(bundle)      # Serialize Model Objects with a Consistent Interface
+library(psych)       # group statistics, including correlations and factor analysis
+library(kableExtra)  # let R Markdown generate a LaTeX‐based PDF
+library(broom)       # Convert Statistical Objects into Tidy tables
+library(olsrr)       # package for p-value backward elimination
+library(MASS)        # Functions & datasets for Venables & Ripley
+library(rlang)       # Functions for Base Types and Core R and 'Tidyverse' Features
+library(gt)          # Easily create presentation-ready display tables
+```
+
+### Create Custom Functions (Code in Appendix)
+
+```{r load-funs, include = FALSE, ref.label = "functions"}
+```
+
+## Importing and Organizing Data
+
+```{r data_import}
+df <- read_csv(here("data", "salesSFapr2023toMarch2025Updated.csv")) |>
+  rename_with(toupper)    # clean_names()
+```
+
+## Organize Data I
+
+```{r data_org_1}
+# ─── 1. Price Categories ───────────────────────────────────────────────────────
+df <- df |> 
+  mutate(   
+    PRICECLASS = case_when(    # Lines 25 -> 34
+      SALEPRICE < 48000                        ~ 1,
+      SALEPRICE < 67000  & SALEPRICE >= 48000  ~ 2,
+      SALEPRICE < 94000  & SALEPRICE >= 67000  ~ 3,
+      SALEPRICE < 134000 & SALEPRICE >= 94000  ~ 4,
+      SALEPRICE >= 134000                      ~ 5
+    ),
+    PRICECLASS = factor(       # Lines 36 -> 41
+      PRICECLASS,
+      levels = 1:5,
+      labels = c(
+        "Below 48000", "48000 to 67000", "67000 to 94000", "94000 to 134000", "134000+"
+      )
+    )
+  )
+
+df <- df |>  
+  # ─── 2. Filter to Relevant Styles    Lines 60 -> 67
+  dplyr::filter(SRESB_STYLE %in% c("SINGLE FAMILY", "1/2 DUPLEX", "ROW HOUSE")) |> 
+  # ─── 3. Deduplicate Records    Lines 93 -> 122
+  arrange(PARCELNO, SALEPRICE, SALEDATE) |>
+  group_by(PARCELNO, SALEPRICE, SALEDATE) |>
+  mutate(PRIMARYFIRST = row_number() == 1, PRIMARYLAST = row_number() == n()) |>
+  ungroup() |> dplyr::filter(PRIMARYLAST) |> 
+  # ─── 4. Exclude Assessment‐Equal Sales    Lines 129 -> 140
+  mutate(
+    PRICEISASMT_RATIO  = AVWHENSOLD / SALEPRICE,
+    PRICEISASMT_RATIO2 = if_else(between(PRICEISASMT_RATIO, .90, 1.10), 1, PRICEISASMT_RATIO),
+    PRICEISASMT        = if_else(PRICEISASMT_RATIO == 1, 0L, 1L)
+  ) |>
+  dplyr::filter(PRICEISASMT == 1) |> 
+  # ─── 5. Outlier Removal    Lines 71 -> 87
+  mutate(
+    OUT = case_when(
+      STOTALSQFT      < 400   ~ 1L,
+      SRESB_FLOORAREA < 400   ~ 1L,
+      SALEPRICE       < 10000 ~ 1L,
+      TRUE                    ~ 0L
+    )
+  ) |>
+  dplyr::filter(OUT == 0) |> 
+  # ─── 6. Story‐Style Dummies    9. Year‐Built Era  Lines 225 -> 330    
+  mutate(
+    ONESTORY            = as.integer(SRESB_STYHGT <= 2),
+    TWOSTORY            = as.integer(SRESB_STYHGT > 2 & SRESB_STYHGT <= 5),
+    SINGLE_FAMILY1STORY = as.integer(SRESB_STYLE == "SINGLE FAMILY" & ONESTORY == 1),
+    SINGLE_FAMILY2STORY = as.integer(SRESB_STYLE == "SINGLE FAMILY" & TWOSTORY == 1),
+    HALF_DUPLEX1STORY   = as.integer(SRESB_STYLE == "1/2 DUPLEX" & ONESTORY == 1),
+    HALF_DUPLEX2STORY   = as.integer(SRESB_STYLE == "1/2 DUPLEX" & TWOSTORY == 1),
+    ERABUILT = case_when(
+      SRESB_YEARBUILT <  1910                           ~ 1,
+      SRESB_YEARBUILT <  1930 & SRESB_YEARBUILT >= 1910 ~ 2,
+      SRESB_YEARBUILT <  1946 & SRESB_YEARBUILT >= 1930 ~ 3,
+      SRESB_YEARBUILT <  1961 & SRESB_YEARBUILT >= 1946 ~ 4,
+      SRESB_YEARBUILT <= 1990 & SRESB_YEARBUILT >= 1961 ~ 5,
+      SRESB_YEARBUILT >  1990                           ~ 6
+    ),
+    YB_PRE_1929     = as.integer(ERABUILT %in% c(1,2)), YB_1930_TO_1945 = as.integer(ERABUILT == 3),
+    YB_1946_TO_1960 = as.integer(ERABUILT == 4), YB_POST_1961 = as.integer(ERABUILT %in% c(5,6))
+  ) |> 
+  # ─── 7. Condition Dummies    Lines 334 -> 386
+  mutate(
+    EXCELLENT = as.integer(SCOND == 0), VERY_GOOD = as.integer(SCOND == 1),
+    GOOD      = as.integer(SCOND == 2), AVERAGE   = as.integer(SCOND == 3),
+    FAIR      = as.integer(SCOND == 4), POOR      = as.integer(SCOND == 5),
+    VERY_POOR_UNSOUND  = as.integer(SCOND %in% c(6,7)),
+    TWO_PLUS_BATHS = as.integer(SRESB_FULLBATHS >= 2), TWO_BATHS = as.integer(SRESB_FULLBATHS == 2),
+    POWDER_ROOM    = as.integer(SRESB_HALFBATHS >= 1), ONE_BATH  = as.integer(SRESB_FULLBATHS == 1),
+    TOTAL_BATHS    = as.integer(SRESB_FULLBATHS + 0.5 * SRESB_HALFBATHS),
+    FIREPLACE      = as.integer(SRESB_FIREPLACE >= 1)
+  ) |> 
+  # ─── 8. Basement & Garage    Lines 393 -> 473
+  mutate(
+    PCTCRAWL       = SRESB_CRAWSPACE / SRESB_GROUNDAREA,
+    PCTSLAB        = SRESB_SLABAREA / SRESB_GROUNDAREA,
+    PCTBSMNT       = SRESB_BASEMENTAREA / SRESB_GROUNDAREA,
+    CRAWL          = as.integer(PCTCRAWL > PCTBSMNT & PCTCRAWL > PCTSLAB),
+    SLAB           = as.integer(PCTSLAB  > PCTCRAWL & PCTSLAB  > PCTBSMNT),
+    GARAGE         = as.integer(SRESB_GARAGEAREA >= 200),
+    ONE_CAR_GARAGE = as.integer(SREB_GARTYPE == 1),
+    TWO_CAR_GARAGE = as.integer(SREB_GARTYPE == 2),
+    GARAGESPACES   = case_when(
+      SRESB_GARAGEAREA > 200 & SRESB_GARAGEAREA < 420 ~ 1,
+      SRESB_GARAGEAREA > 419 & SRESB_GARAGEAREA < 600 ~ 2,
+      SRESB_GARAGEAREA > 599 & SRESB_GARAGEAREA < 820 ~ 3, SRESB_GARAGEAREA > 819 ~ 4
+    ),
+    LN_GARAGESPACES = log(GARAGESPACES)
+  ) |> 
+  # ─── 9. Quality & Street Class    Lines 478 -> 544
+  mutate(
+    QABOVE_AVG      = as.integer(SRESB_BLDGCLASS %in% c(3,4,5)),
+    Q_AVG           = as.integer(SRESB_BLDGCLASS == 2),
+    QBELOW_AVG      = as.integer(SRESB_BLDGCLASS %in% c(0,1)),
+    ARTERIAL        = as.integer(RD_CLASS == "A31"),
+    FORCED_AIR      = as.integer(SRESB_HEAT %in% c(0,1)),
+    HOT_WATER       = as.integer(SRESB_HEAT == 2), ELEC_BASEBOARD = as.integer(SRESB_HEAT == 3),
+    ELEC_RADIANT = as.integer(SRESB_HEAT == 4), RADIANT_FLOOR  = as.integer(SRESB_HEAT == 5),
+    ELEC_WALL       = as.integer(SRESB_HEAT == 6), SPACE_HEATER   = as.integer(SRESB_HEAT == 7),
+    WALL            = as.integer(SRESB_HEAT == 8), CENTRAL_AIR    = as.integer(SRESB_HEAT == 9),
+    SIZE = case_when(
+      SRESB_FLOORAREA <   830                            ~ 1,
+      SRESB_FLOORAREA <   1018 & SRESB_FLOORAREA >= 830  ~ 2,
+      SRESB_FLOORAREA <   1266 & SRESB_FLOORAREA >= 1018 ~ 3,
+      SRESB_FLOORAREA <   1659 & SRESB_FLOORAREA >= 1266 ~ 4,
+      SRESB_FLOORAREA >=  1659                           ~ 5
+    ),
+    SMALLEST = as.integer(SIZE == 1), SMALL = as.integer(SIZE == 2),
+    AVG = as.integer(SIZE == 3),      LARGE = as.integer(SIZE == 4),
+    LARGEST = as.integer(SIZE == 5)
+  ) |> 
+  # ─── 10. Building Size & Lot Ratios    Lines 551 -> 593
+  mutate(
+    RATIO                  = SESTTCV / SALEPRICE,
+    SPPSF                  = SALEPRICE / SRESB_FLOORAREA,
+    BASE_BLDGSIZE          = case_when(
+                             SRESB_STYLE == "SINGLE FAMILY" ~ 1056,
+                             SRESB_STYLE == "1/2 DUPLEX"    ~ 840,
+                             TRUE                           ~ NA_real_
+                           ),
+    BASE_BLDGSIZE_RATIO    = SRESB_FLOORAREA / BASE_BLDGSIZE,
+    LN_BASE_BLDGSIZE_RATIO = log(BASE_BLDGSIZE_RATIO),
+    LANDRATIO              = STOTALSQFT / case_when(
+                             SRESB_STYLE == "SINGLE FAMILY" ~ 4599,
+                             SRESB_STYLE == "1/2 DUPLEX"    ~ 3180,
+                             TRUE                           ~ NA_real_
+                           ),
+    LANDRATIO2             = pmin(LANDRATIO, if_else(SRESB_STYLE == "SINGLE FAMILY",4,3)),
+    LN_LANDRATIO           = log(LANDRATIO2),
+    SALEDATE      = as_date(SALEDATE),
+    MONTHS        = interval(min(SALEDATE), SALEDATE) %/% months(1), # LINE 498
+    MONTHS_1TO9   = case_when(MONTHS <= 9  ~ MONTHS, TRUE ~ 9),
+    MONTHS_10TO16 = case_when(MONTHS <= 9  ~ 0, MONTHS <= 16 ~ MONTHS - 9, TRUE ~ 7),
+    MONTHS_17TO24 = case_when(MONTHS <= 16 ~ 0, TRUE ~ MONTHS - 16),
+    LN_SPPSF      = log(SPPSF),
+    LN_PRICE      = log(SALEPRICE),
+    LNSBLDSF      = log(SRESB_FLOORAREA), SBLDSFINT = SRESB_FLOORAREA - 432,
+    # LNSBLDSFINT   = log(SBLDSFINT),  # LINEs 650 -> 658
+  )
+```
+
+## Organize Data II
+
+```{r data_org_2}
+RATE1 <- 0.004818; RATE2 <- 0.016146; RATE3 <- 0.0; END_INDEX <- 1.17
+
+df <- df |> 
+  # ─── 11. Time Variables & Price Adjustment    Lines 520 -> 532
+  mutate(
+    PRICE_INDEX = (1 + RATE1)^MONTHS_1TO9 * (1 + RATE2)^MONTHS_10TO16 * (1 + RATE3)^MONTHS_17TO24,
+    TAF         = END_INDEX / PRICE_INDEX,
+    TASP        = SALEPRICE * TAF,
+    LN_TASP     = log(TASP),
+    TASPPSF     = TASP / SRESB_FLOORAREA
+  )
+psych::describe(df$PRICE_INDEX)
+# graphing(df, MONTHS, PRICE_INDEX, 'cyan', 'Months', 'Price Index', 'Index By Month')
+  
+```
+
+## Create Models
+
+```{r mod_make_1}
+# Initial full model ***
+full_model_1 <- lm(LN_SPPSF ~ ARTERIAL + CRAWL + SLAB + SINGLE_FAMILY1STORY + SINGLE_FAMILY2STORY +
+                   HALF_DUPLEX1STORY + HALF_DUPLEX2STORY + SMALLEST + SMALL + LARGE + LARGEST +
+                   AVG + TWO_PLUS_BATHS + POWDER_ROOM + LN_GARAGESPACES + FIREPLACE +
+                   EXCELLENT + VERY_GOOD + GOOD + AVERAGE + FAIR + POOR + VERY_POOR_UNSOUND +
+                   QABOVE_AVG + QBELOW_AVG + Q_AVG +
+                   YB_PRE_1929 + YB_1930_TO_1945 + YB_1946_TO_1960 + YB_POST_1961 +
+                   HOT_WATER + ELEC_BASEBOARD + ELEC_WALL + WALL + CENTRAL_AIR + ELEC_RADIANT +
+                   RADIANT_FLOOR + SPACE_HEATER + MONTHS_1TO9 + MONTHS_10TO16 + MONTHS_17TO24,
+                 data = df, na.action = na.omit)
+
+# Perform backward stepwise regression
+backward_model_1 <- stats::step(full_model_1, direction = "backward")
+
+summary(backward_model_1)    # View the summary of the final model
+```
+
+```{r mod_1_stats}
+# The tidy() function from the broom package converts the model output
+# into a clean data frame with one row for each coefficient.
+model_1_summary <- tidy(backward_model_1)
+
+model_1_summary |>
+  # We don't usually plot the p-value for the intercept
+  filter(term != "(Intercept)") |>
+  ggplot(aes(x = p.value, y = reorder(term, p.value))) +
+  geom_point(size = 4) +
+  # Add a vertical line for the common significance threshold (alpha = 0.05)
+  geom_vline(xintercept = 0.05, linetype = "dashed", color = "red") +
+  # Using a log scale for the x-axis is often essential for p-values,
+  # as they can be clustered near zero.
+  scale_x_log10() +
+  labs(
+    title = "P-Values for Predictors in Model I",
+    subtitle = "Predicting log SPPSF",
+    x = "P-Value (log scale)",
+    y = "Predictor"
+  ) +
+  theme_minimal()
+```
+
+
+```{r mod_make_2}
+# Second full model *** Lines 762 -> 778
+full_model_2 <- lm(LN_PRICE ~ ARTERIAL + CRAWL + SLAB + LN_LANDRATIO + # LN_BASE_BLDGSIZE_RATIO +
+                   SINGLE_FAMILY1STORY + SINGLE_FAMILY2STORY + HALF_DUPLEX1STORY +
+                   HALF_DUPLEX2STORY + SMALLEST + SMALL + LARGE + LARGEST + AVG +
+                   TWO_PLUS_BATHS + POWDER_ROOM + LN_GARAGESPACES + FIREPLACE +
+                   EXCELLENT + VERY_GOOD + GOOD + AVERAGE + FAIR + POOR + VERY_POOR_UNSOUND +
+                   QABOVE_AVG + QBELOW_AVG + Q_AVG +
+                   YB_PRE_1929 + YB_1930_TO_1945 + YB_1946_TO_1960 + YB_POST_1961 +
+                   HOT_WATER + ELEC_BASEBOARD + ELEC_WALL + WALL + CENTRAL_AIR + ELEC_RADIANT +
+                   RADIANT_FLOOR + SPACE_HEATER + MONTHS_1TO9 + MONTHS_10TO16 + MONTHS_17TO24,
+                 data = df, na.action = na.omit)
+
+# Perform backward stepwise regression
+backward_model_2 <- stats::step(full_model_2, direction = "backward")
+
+summary(backward_model_2)    # View the summary of the final model
+```
+
+```{r mod_2_stats}
+# The tidy() function from the broom package converts the model output
+# into a clean data frame with one row for each coefficient.
+model_2_summary <- tidy(backward_model_2)
+
+model_2_summary |>
+  # We don't usually plot the p-value for the intercept
+  filter(term != "(Intercept)") |>
+  ggplot(aes(x = p.value, y = reorder(term, p.value))) +
+  geom_point(size = 4) +
+  # Add a vertical line for the common significance threshold (alpha = 0.05)
+  geom_vline(xintercept = 0.05, linetype = "dashed", color = "red") +
+  # Using a log scale for the x-axis is often essential for p-values,
+  # as they can be clustered near zero.
+  scale_x_log10() +
+  labs(
+    title = "P-Values for Predictors in Model II", subtitle = "Predicting Log Sale Price",
+    x     = "P-Value (log scale)",                 y        = "Predictor"
+  ) + theme_minimal()
+```
+
+---
+
+## Entire XGBoost Pipeline
+
+```{r splitfeats}
+# 1. Initial Data Split
+# We'll split the data into a training set and a testing set.
+# The training set is used for model development and tuning.
+# The testing set is held out until the very end to provide an unbiased
+# estimate of the final model's performance.
+set.seed(123) # for reproducibility
+df_split <- initial_split(df, prop = 0.80, strata = LN_SPPSF)
+df_train <- training(df_split)
+df_test  <- testing(df_split)
+
+# 2. Feature Engineering and Preprocessing with Recipes
+# A 'recipe' is a series of steps for data preprocessing. This is one of the
+# most powerful features of tidymodels. We will perform the following steps: 
+# - Convert some integer variables that are actually categorical to factors.
+# - Impute missing values.
+# - Create dummy variables for categorical predictors.
+# - Remove variables with zero variance (no information).
+# - Normalize numeric predictors.
+
+df_recipe <- recipe(LN_SPPSF ~ ARTERIAL + CRAWL + SLAB + LN_LANDRATIO + # LN_BASE_BLDGSIZE_RATIO +
+                   SINGLE_FAMILY1STORY + SINGLE_FAMILY2STORY + HALF_DUPLEX1STORY + HALF_DUPLEX2STORY +
+                   SMALLEST + SMALL + LARGE + LARGEST + AVG +
+                   TWO_PLUS_BATHS + POWDER_ROOM + LN_GARAGESPACES + FIREPLACE +
+                   EXCELLENT + VERY_GOOD + GOOD + AVERAGE + FAIR + POOR + VERY_POOR_UNSOUND +
+                   QABOVE_AVG + QBELOW_AVG + Q_AVG +
+                   YB_PRE_1929 + YB_1930_TO_1945 + YB_1946_TO_1960 + YB_POST_1961 +
+                   HOT_WATER + ELEC_BASEBOARD + ELEC_WALL + WALL + CENTRAL_AIR + ELEC_RADIANT +
+                   RADIANT_FLOOR + SPACE_HEATER +
+                   MONTHS_1TO9 + MONTHS_10TO16 + MONTHS_17TO24, data = df_train) %>%
+  # Impute missing numeric data with the median
+  step_impute_median(all_numeric_predictors()) %>%
+  # Impute missing categorical data with the most frequent value
+  step_impute_mode(all_nominal_predictors()) %>%
+  # Combine infrequent categorical levels into an "other" category. This helps
+  # prevent issues with rare levels that might appear in one data split but not another.
+  step_other(all_nominal_predictors(), threshold = 0.01) %>%
+  # step_novel(all_nominal_predictors()) %>%
+  # Create dummy variables for all categorical predictors
+  step_dummy(all_nominal_predictors()) %>% # , one_hot = TRUE
+  # Remove predictors with no variance
+  step_zv(all_predictors()) %>%
+  # Normalize (center and scale) all numeric predictors
+  step_normalize(all_numeric_predictors()) %>%
+  step_naomit(all_predictors(), all_outcomes())  # hard drop any remaining NA
+
+# You can "prep" and "bake" the recipe to see the results of the preprocessing
+# This is an optional step for verification
+prepped_recipe <- prep(df_recipe, training = df_train)
+baked_data     <- bake(prepped_recipe, new_data = df_train)
+glimpse(baked_data)
+```
+
+```{r save_datas, eval = FALSE}
+# The save function is included in base R
+save(df, df_train, df_test, file = here("data", "cod_23_25_lnsppsf_data.RData"))
+```
+
+```{r load_datas, eval = FALSE}
+load('../data/cod_23_25_lnprice_data.RData')
+```
+
+```{r modspecs}
+# 3. Model Specification
+# We'll use an XGBoost model, which is a powerful and popular algorithm for
+# tabular data and often performs very well in these types of regression tasks.
+# We will tune its hyperparameters.
+
+xgb_spec <- boost_tree(
+  trees          = tune(),    # 1000
+  tree_depth     = tune(),
+  min_n          = tune(),
+  loss_reduction = tune(),
+  sample_size    = tune(),
+  mtry           = tune(),
+  learn_rate     = tune()
+) %>%
+  set_engine("xgboost") %>%
+  set_mode("regression")
+
+# 4. Create a Workflow
+# A workflow bundles the recipe and the model specification together.
+# This makes it much easier to manage the modeling process.
+
+xgb_workflow <- workflow() %>%
+  add_recipe(df_recipe) %>%
+  add_model(xgb_spec)
+
+pset <- tune::extract_parameter_set_dials(xgb_workflow)
+
+prepped <- prep(df_recipe, training = df_train)
+x       <- juice(prepped) |> dplyr::select(-dplyr::all_of('LN_SPPSF'))
+
+params  <- dials::finalize(pset, x)  # uses juiced predictors to set ranges like mtry
+
+# 5. Hyperparameter Tuning
+# We need to find the best combination of hyperparameters for our XGBoost model.
+# We'll use cross-validation and a space-filling design to search the parameter space.
+# Create cross-validation folds from the training data
+set.seed(234)
+df_folds <- vfold_cv(df_train, v = 5)
+# params   <- parameters(pset) %>% finalize(juice(prepped_recipe))
+
+# Define the grid of hyperparameters to search
+# We'll use a space-filling design to explore the parameter space efficiently.
+set.seed(345)
+xgb_grid <- grid_latin_hypercube(
+  trees(c(300, 3000)),
+  tree_depth(),
+  min_n(),
+  loss_reduction(),
+  sample_size = sample_prop(),
+  finalize(mtry(), df_train),
+  learn_rate(),
+  size = 30 # Number of hyperparameter combinations to try
+)
+
+# --- space-filling initial grid (replaces grid_max_entropy) ---
+init_grid <- grid_space_filling(params, size = 40)
+
+# Start the tuning process
+# We'll use tune_grid() to apply our workflow to the cross-validation folds
+# and test all the hyperparameter combinations.
+# The `control_grid(save_pred = TRUE)` option saves the predictions for later inspection.
+doParallel::registerDoParallel() # Use parallel processing to speed things up
+
+set.seed(456)
+xgb_tune_res <- tune_grid(
+  xgb_workflow,
+  resamples = df_folds,
+  grid      = xgb_grid,
+  metrics   = metric_set(rmse, rsq),
+  control   = control_grid(save_pred = TRUE) # verbose = TRUE
+)
+```
+
+```{r bayes, eval = FALSE}
+# ... then seed Bayesian optimization with those results
+bayes_res <- tune_bayes(
+  xgb_workflow,
+  resamples = df_folds,
+  initial   = xgb_tune_res,        # or just `initial = 20` for 20 random starts
+  iter      = 30,
+  metrics   = metric_set(rmse, rsq),
+  control   = control_bayes(verbose = TRUE)
+)
+
+best <- select_best(bayes_res, "rmse")
+final_wf <- finalize_workflow(xgb_workflow, best) %>% fit(df_train)
+
+preds <- predict(final_wf, df_test) %>% bind_cols(df_test)
+rmse(preds, truth = LN_PRICE, estimate = .pred)
+rsq(preds,  truth = LN_PRICE, estimate = .pred)
+```
+
+
+```{r makedamod}
+# 8. Analyze Tuning Results and Finalize the Model
+# Let's see which hyperparameters performed the best.
+
+# Show the best performing models based on root mean squared error (RMSE)
+show_best(xgb_tune_res, metric = "rmse")
+
+# We can also visualize the results
+autoplot(xgb_tune_res)
+
+# Select the best set of hyperparameters
+best_xgb_params <- select_best(xgb_tune_res, metric = "rmse")
+
+# Finalize the workflow by updating it with the best hyperparameters
+final_xgb_workflow <- finalize_workflow(
+  xgb_workflow,
+  best_xgb_params
+)
+
+# 9. Train the Final Model and Evaluate on the Test Set
+# Now, we'll train our final model on the *entire training set* and then
+# evaluate its performance on the *held-out test set*. This gives us an
+# unbiased
+# assessment of how our model is likely to perform on new, unseen data.
+# The `last_fit()` function does this for us: it fits the final model on the
+# full training set and evaluates it on the test set.
+final_fit <- last_fit(final_xgb_workflow, df_split)
+
+# Collect the metrics from the test set evaluation
+test_set_metrics <- collect_metrics(final_fit)
+print(test_set_metrics)
+
+# Collect the predictions on the test set
+test_set_predictions <- collect_predictions(final_fit)
+print(test_set_predictions)
+
+# Since we predicted the log10 of the price, let's transform it back
+# to the original scale for interpretation.
+test_set_predictions <- test_set_predictions %>%
+  mutate(
+    LN_SPPSF = 10^LN_SPPSF,
+    .pred = 10^.pred
+  )
+
+# Visualize the final predictions vs actual values
+ggplot(test_set_predictions, aes(x = LN_SPPSF, y = .pred)) +
+  geom_point(alpha = 0.5) +
+  geom_abline(color = "red", lty = 2) +
+  labs(
+    title = "Actual vs. Predicted Sale Prices on the Test Set",
+    x = "Actual Sale Price",
+    y = "Predicted Sale Price"
+  ) +
+  scale_x_continuous(labels = scales::dollar_format()) +
+  scale_y_continuous(labels = scales::dollar_format()) +
+  coord_obs_pred() +
+  theme_minimal()
+
+# You can now use the `final_fit` object to make predictions on new data.
+# The workflow is stored inside:
+final_model_object <- extract_workflow(final_fit)
+# saveRDS(final_model_object, "my_avm_model.rds")
+# To make predictions on new data:
+# loaded_model <- readRDS("my_avm_model.rds")
+# new_predictions <- predict(loaded_model, new_ames_data)
+
+# https://learningstatisticswithr.com/book/regression.html#corrhyp
+```
+
+```{r save_mod, eval = FALSE}
+# saveRDS(final_model_object, here("data", "cod_23_25_lnprice_model.rds")
+save(backward_model_2, file = here("data", "cod_23_25_lnprice_model.rda"))
+```
+
+```{r save_mod2, eval = FALSE}
+# saveRDS(final_model_object, file = here("models", "cod_23_25_lnsppsf_xgbmodel.rds"))
+save(xgb_tune_res, file = here("models", "cod_23_25_lnsppsf_xgmodel.rds"))
+```
+
+```{r load_mod, eval = FALSE}
+loaded_model <- readRDS("cod_23_25_lnprice_model.rds")
+load("cod_23_25_lnprice_lmrev.rda")
+```
+
+```{r rmse}
+rmse_base <- yardstick::rmse_vec(truth = df_test$LN_PRICE,
+                                 estimate = rep(mean(df_train$LN_PRICE), nrow(df_test)))
+cat("Baseline RMSE (predict mean):", rmse_base, "\n")
+
+```
+
+## Custom Functions
+
+```{r functions}
+ftable <- function(data, variable, digits = 1) {
+# data : data frame | variable : unquoted column name | digits : num decimals for the percent
+  tbl <- data |>                               # 1) build the basic tabyl, add % formatting and totals
+    tabyl({{ variable }}) |>                   # frequency table
+    adorn_pct_formatting(digits = digits) |>   # "12.3%"
+    adorn_totals()                              # add a "Total" column
+  mat <- t(tbl)                                 # 2) transpose to get categories across the top
+  colnames(mat) <- rep("", ncol(mat))           # 3) blank out the auto-generated 1,2,3… column names
+  print(mat)                                    # return as a matrix, or wrap in kable() downstream
+}
+
+graphing <- function(data, x, y, color, xlab, ylab, title) {
+  xq <- enquo(x)
+  yq <- enquo(y)
+  ggplot(data, aes(x = !!xq, y = !!yq)) +
+    geom_point() +
+    stat_smooth(method = "lm", se = FALSE, color = color) +
+    stat_regline_equation(
+      aes(label =  paste(after_stat(eq.label), after_stat(adj.rr.label), sep = "~~~")),
+      label.x.npc = 0.2,    # use "npc" coordinates 0–1 in panel
+      label.y.npc = 0.8
+    ) +
+    labs(x = xlab, y = ylab, title = title) +
+    theme_minimal()
+}
+```
+
+```{r}
+prepped2 <- prep(df_recipe, training = analysis(df_folds$splits[[1]]))
+ncol(juice(prepped2))  # should be > 1 (includes outcome)
+
+```
+
+

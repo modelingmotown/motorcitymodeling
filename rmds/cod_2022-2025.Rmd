@@ -1,0 +1,521 @@
+---
+title: "City of Detroit 2022 - 2025 Sales"
+author: |
+  | Elliot Dean - Program Analyst IV  
+  | Office of the Chief Financial Officer | Office of the Assessor
+  | City of Detroit
+date: "`r sub('^0', '', format(Sys.Date(), '%d %B %Y'))`"
+geometry: margin = 1.5cm
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+mainfont: Arial
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, error = FALSE, echo = FALSE)
+```
+
+```{r lib_load}
+library(tidyverse)   # data wrangling & ggplot2
+library(janitor)     # functions for examining and cleaning dirty data
+library(kableExtra)  # simple table generator
+library(here)        # Find files within a project
+library(olsrr)       # package for p-value backward elimination
+library(broom)       # summarizes key information about models
+library(rlang)       # functions for Base Types and Core R and 'Tidyverse' Features
+library(car)         # VIF, influence measures helpers
+library(scales)      # provides the internal scaling infrastructure used by ggplot
+library(mgcv)        # Mixed GAM Computation Vehicle
+library(fastDummies) # Fast Creation of Dummy (Binary) Columns & Rows from Categorical Variables
+library(diffdf)      # tools for working with data frame difference
+```
+
+---
+
+## Introduction
+
+This report evaluates the metrics of a linear regression model created from citywide datasets of
+sales data from the years 2022 - 2024 and 2023 - 2025. Overlapping sales IDs were removed to
+include only unique sales, leaving a dataset containing single family residential sales from
+2022 - 2025. After removing outliers in the initial data prep, a total of 19756 sales were used
+for model development.
+
+Custom functions were written to automate variable creation from initial datasets, calculate
+assessing coefficients (PRD, COD, PRB), variance factors, and graphs.
+
+
+```{r fun}
+#load(file = here("rmds/modfunctions", "modfunctions11.RData"))
+load(file = here("rmds/modfunctions", "modfunctions13.RData"))
+
+codf    <- readRDS(file = here("rmds/modfunctions", "codfunctions.rds"))
+codform <- readRDS(file = here("rmds", "codformulas.rds"))
+
+codf_env <- list2env(codf, parent = globalenv())
+for (nm in names(codf)) {environment(codf[[nm]]) <- codf_env}
+list2env(codf, envir = codf_env)
+source(here("rmds/cod2325/districtruns/d2325f", "spss_cod_district-7_23-25f.R"), local = knitr::knit_global())
+```
+
+Functions Used: modfunctions_notes.R + modelfunctions.R
+
+```{r data_import}
+# ---- 1. Load data & normalize names ----
+df22 <- read_csv(here("data/city", "SFResiSalesJUN2022-MAY2024_w-Exterior1.csv")) |>
+  rename_with(tolower)    # clean_names()
+
+df23 <- read_csv(here("data/city", "salesSFapr2023toMarch2025Updated.csv")) |>
+  rename_with(tolower)    # clean_names()
+```
+
+R Data File: cod_2022-2025.RData
+Original Data Files: 
+salesSFapr2023toMarch2025Updated.csv + 
+SFResiSalesJUN2022-MAY2024_w-Exterior1.csv
+
+```{r data_prep1, eval=FALSE}
+res22        <- prep_cod_sales(df22, origin_month = as.Date("2022-06-01"))
+df_prepped22 <- res22$data
+ecfs_col22   <- res22$ecfs_col
+```
+
+```{r data_prep2, eval=FALSE}
+res23        <- prep_cod_sales3(df23, origin_month = as.Date("2023-04-01"))
+df_prepped23 <- res23$data
+ecfs_col23   <- res23$ecfs_col
+```
+
+```{r dfcheck, eval=FALSE}
+#diffdf(df_prepped511, df_prepped51)
+diffdf(combined_anti_join, combined_distinct)
+```
+
+```{r dataprep}
+c24      <- codf$combine_sales_windows(df22, df23, id_col = "saleid", keep = "new")
+df24     <- c24$data
+
+cod24    <- codf$prep_cod_sales(df24, origin_month = as.Date("2022-06-01"))
+df25       <- cod24$data
+ecf_col <- cod24$ecfs_col
+
+df <- df25
+ecfs_col <- ecf_col
+```
+
+```{r ranges, eval=FALSE}
+# Get the absolute minimum and maximum dates (converting to Date to drop the time component)
+min_date <- as.Date(min(combined_anti_join$saledate, na.rm = TRUE))
+max_date <- as.Date(max(combined_anti_join$saledate, na.rm = TRUE))
+
+# Generate a continuous sequence of days
+date_sequence <- seq(from = min_date, to = max_date, by = "day")
+
+# Convert it into a simple dataframe
+all_dates_df <- data.frame(Date = date_sequence)
+
+#print(all_dates_df)
+```
+
+```{r, eval=FALSE}
+# Extract unique dates, convert them to Date format (removing time), and sort them
+unique_dates_df <- data.frame(
+  Date = sort(unique(as.Date(combined_anti_join$saledate)))
+)
+
+# Optional: drop any NA rows if there were blank dates
+unique_dates_df <- drop_na(unique_dates_df)
+
+print(unique_dates_df)
+```
+
+## Model I
+
+```{r mod1}
+# --- Model 1: LN_SPPSF with time splines (SPSS runs this to get time coefficients)
+formula_time <- ln_sppsf ~ arterial +
+  single_family1story + half_duplex1story + half_duplex2story +
+  smallest + small + large + largest +
+  two_plus_baths + powder_room +
+  good + fair + poor + very_poor_unsound +
+  qabove_avg + qbelow_avg +
+  yb_pre_1929 + yb_1946_to_1960 + yb_post_1961 +
+  crawl + slab +
+  ln_garagespaces + fireplace +
+  hot_water + elec_baseboard + wall + central_air +
+  months_1to9 + months_10to16 + months_17to24
+
+mod_time <- backward_p(formula_time, data = df, p_out = 0.10, verbose = TRUE)
+#summary(mod_time)
+
+# --- Automatically pull time coefficients to compute RATEs (optional)
+time_coefs <- coef(mod_time)[c("months_1to9", "months_10to16", "months_17to24")]
+#time_coefs
+
+rate1 <- unname(ifelse(is.na(time_coefs["months_1to9"]), 0, time_coefs["months_1to9"]))
+rate2 <- unname(ifelse(is.na(time_coefs["months_10to16"]), 0, time_coefs["months_10to16"]))
+rate3 <- unname(ifelse(is.na(time_coefs["months_17to24"]), 0, time_coefs["months_17to24"]))
+
+get_b <- function(mod, nm) {
+  cf <- stats::coef(mod)        # <- IMPORTANT: coef(mod), not coef[...]
+  b  <- cf[nm]                  # returns NA if missing, never NULL
+  base::unname(b)
+}
+
+b1 <- get_b(mod_time, "months_1to9")
+b2 <- get_b(mod_time, "months_10to16")
+b3 <- get_b(mod_time, "months_17to24")
+
+# If you want to STOP when any term is missing:
+missing <- c("months_1to9","months_10to16","months_17to24")[is.na(c(b1,b2,b3))]
+if (length(missing) > 0) stop("Missing month term(s) in model: ", paste(missing, collapse=", "))
+
+rate1 <- base::exp(b1) - 1
+rate2 <- base::exp(b2) - 1
+rate3 <- base::exp(b3) - 1
+
+# PRICE_INDEX and TAF (time adjustment factor)
+df <- df %>%
+  mutate(
+    price_index = (1 + rate1) ^ months_1to9 * (1 + rate2) ^ months_10to16 *
+                  (1 + rate3) ^ months_17to24
+  )
+
+# Choose end_index = price_index at target month (SPSS: "last month")
+# Here: by default, use the max MONTHS observed.
+end_month <- max(df$months, na.rm = TRUE)
+end_index <- df %>%  filter(months == end_month) %>%
+  summarise(end_index = mean(price_index, na.rm = TRUE)) %>%  pull(end_index)
+
+df <- df %>%
+  mutate(
+    taf   = end_index / price_index,    tasp  = saleprice * taf,
+    tasppsf = tasp / sresb_floorarea,   ln_tasp = log(tasp)
+  )
+```
+
+```{r mod1c, results='asis'}
+model_metrics_A(mod_time, "LN\\_SPPSF model fit statistics")
+coef_table(mod_time, "LN\\_SPPSF model coefficients (95% CI)")
+```
+
+---
+
+## Model II
+
+```{r mod2}
+# --- Model 2: LN_PRICE without ECFs (SPSS "TEST MODEL WITHOUT ECFS")
+formula_ln_price_no_ecf <- ln_price ~ ln_landratio + ln_base_bldgsize_ratio +
+  arterial +
+  single_family1story + half_duplex1story + half_duplex2story +
+  smallest + small + large + largest +
+  two_plus_baths + powder_room +
+  good + fair + poor + very_poor_unsound +
+  qabove_avg + qbelow_avg +
+  yb_pre_1929 + yb_1946_to_1960 + yb_post_1961 +
+  crawl + slab +
+  ln_garagespaces + fireplace +
+  hot_water + elec_baseboard + wall + central_air +
+  months_1to9 + months_10to16 + months_17to24
+
+mod_ln_price_no_ecf <- backward_p(formula_ln_price_no_ecf, data = df, p_out = 0.10, verbose = TRUE)
+# summary(mod_ln_price_no_ecf)
+```
+
+```{r modm2, results='asis'}
+model_metrics_A(mod_ln_price_no_ecf, "LN\\_PRICE model fit statistics")
+coef_table(mod_ln_price_no_ecf, "LN\\_PRICE model coefficients (95% CI)")
+```
+
+---
+
+## Model III
+
+```{r mod3}
+# --- Model 3: BASE MODEL with ECFs (SPSS "BASE MODEL", dependent LN_PRICE)
+# build RHS terms as character vector, then turn into a formula
+rhs <- c(
+  "ln_landratio", "ln_base_bldgsize_ratio",
+  "arterial",
+  "single_family1story", "half_duplex1story", "half_duplex2story",
+  "smallest", "small", "large", "largest",
+  "two_plus_baths", "powder_room",
+  "good", "fair", "poor", "very_poor_unsound",
+  "qabove_avg", "qbelow_avg",
+  "yb_pre_1929", "yb_1946_to_1960", "yb_post_1961",
+  "crawl", "slab",
+  "ln_garagespaces", "fireplace",
+  "hot_water", "elec_baseboard", "wall", "central_air",
+  ecfs_col,  # <-- splices *all* secf_ dummy columns in correctly
+  "months_1to9", "months_10to16", "months_17to24"
+)
+
+formula_base <- reformulate(rhs, response = "ln_price")
+
+mod_base <- backward_p(formula_base, data = df, p_out = 0.10, verbose = TRUE)
+#summary(mod_base)
+
+# Save predictions and influence measures similar to SPSS /SAVE=
+df <- df %>%
+  mutate(pre_1 = predict(mod_base, newdata = df), esp1  = exp(pre_1), ratio1 = esp1 / saleprice)
+
+# Assessing metrics output
+rrmetrics <- ratio_metrics(df, esp1, saleprice)
+
+knitr::kable(
+  rrmetrics,  format   = "latex",  booktabs = TRUE,
+  caption  = "LN\\_PRICE model (base) assessing coefficients"   # <-- no \\_
+  # escape = TRUE is the default; keep it that way
+) %>%  kable_styling(latex_options = c("hold_position", "striped"), font_size = 8)
+
+# Ratio stats like SPSS RATIO STATS ... BY ...
+ratio_ecf   <- ratio_by(df, esp1, saleprice, ecf)
+ratio_style <- ratio_by(df, esp1, saleprice, sresb_style)
+ratio_cond  <- ratio_by(df, esp1, saleprice, scond)
+ratio_size  <- ratio_by(df, esp1, saleprice, size)
+ratio_era   <- ratio_by(df, esp1, saleprice, erabuilt)
+ratio_fire  <- ratio_by(df, esp1, saleprice, fireplace)
+ratio_priceclass <- ratio_by(df, esp1, saleprice, priceclass)
+
+# Within bands (10/20/50)
+df <- df %>%
+  mutate(
+    within10_1 = if_else(ratio1 >= 0.9 & ratio1 <= 1.1, 1L, 0L),
+    within20_1 = if_else(ratio1 >= 0.8 & ratio1 <= 1.2, 1L, 0L),
+    within50_1 = if_else(ratio1 >= 0.5 & ratio1 <= 1.5, 1L, 0L)
+  )
+
+# 22) Outlier / influence removal (SPSS: COOK > 4/N, |SDRESID| > 2)
+N_total <- nrow(df)
+infl <- influence.measures(mod_base)
+cook <- cooks.distance(mod_base)
+stud <- rstudent(mod_base)
+
+rows_used <- as.integer(rownames(model.frame(mod_base)))  # row numbers from the data used in lm()
+
+df <- df %>%
+  mutate(cook_1 = NA_real_,    stud_1  = NA_real_) |> 
+  mutate(
+    cook_1 = replace(cook_1, rows_used, cook),    stud_1 = replace(stud_1, rows_used, stud),
+    in_inlier = if_else(cook_1 <= (4 / N_total) & abs(stud_1) <= 2, 1L, 0L)
+    )
+
+df_in <- df %>% filter(in_inlier == 1)
+
+mod_base_inliers <- backward_p(formula_base, data = df_in, p_out = 0.10, verbose = TRUE)
+#summary(mod_base_inliers)
+
+df_in <- df_in %>%
+  mutate(
+    pre_2 = predict(mod_base_inliers, newdata = df_in),
+    esp2  = exp(pre_2),    ratio2 = esp2 / saleprice,
+    within10_2 = if_else(ratio2 >= 0.9 & ratio2 <= 1.1, 1L, 0L),
+    within20_2 = if_else(ratio2 >= 0.8 & ratio2 <= 1.2, 1L, 0L),
+    within50_2 = if_else(ratio2 >= 0.5 & ratio2 <= 1.5, 1L, 0L)
+  )
+
+# 23) Recalibrate time adjustments (SPSS shows an example with new RATEs)
+# You can either:
+#  - re-extract from a model that still has time splines, or  - set them manually.
+# Here we demonstrate manual override:
+
+time_coefs2 <- coef(mod_base)[c("months_1to9", "months_10to16", "months_17to24")]
+#time_coefs2
+
+# SPSS manually copies these:
+# RATE1=-0.009842; RATE2=0.022764; RATE3=0
+# If you'd rather hard-code like SPSS, set these explicitly.
+RATE1_re <- unname(ifelse(is.na(time_coefs2["months_1to9"]), 0, time_coefs2["months_1to9"]))
+RATE2_re <- unname(ifelse(is.na(time_coefs2["months_10to16"]), 0, time_coefs2["months_10to16"]))
+RATE3_re <- unname(ifelse(is.na(time_coefs2["months_17to24"]), 0, time_coefs2["months_17to24"]))
+
+df_in <- df_in %>%
+  mutate(
+    price_index_re = (1 + RATE1_re) ^ months_1to9 * (1 + RATE2_re) ^ months_10to16 *
+                     (1 + RATE3_re) ^ months_17to24
+  )
+
+end_month_in <- max(df_in$months, na.rm = TRUE)
+END_INDEX_re <- df_in %>%
+  filter(months == end_month_in) %>%
+  summarise(end_index = mean(price_index_re, na.rm = TRUE)) %>%  pull(end_index)
+
+df_in <- df_in %>%
+  mutate(
+    taf_re  = END_INDEX_re / price_index_re,
+    tasp_re = saleprice * taf_re,    ln_tasp_re = log(tasp_re)
+  )
+
+df_in1 <- df_in %>% select(saleid, pre_2, esp2, ratio2, within10_2, within20_2, within50_2,
+                             price_index_re, taf_re, tasp_re, ln_tasp_re)
+
+dfa <- df %>% left_join(df_in1, by = "saleid")
+```
+
+```{r modm3, results='asis'}
+model_metrics_A(mod_base, "LN\\_PRICE (base) model fit statistics")
+coef_table(mod_base, "LN\\_PRICE (+ECFs) model coefficients (95% CI)")
+```
+
+```{r m3vif, results='asis'}
+safe_vif_kable(mod_base)
+```
+
+---
+
+## Model IV
+
+```{r mod4}
+# 24) Model with recalibrated time adjustments (dependent LN_TASP, remove time vars)
+# SPSS: LN_TASP with ECFs, no months splines
+rhs2 <- c(
+  "ln_landratio", "ln_base_bldgsize_ratio",
+  "arterial",
+  "single_family1story", "half_duplex1story", "half_duplex2story",
+  "smallest", "small", "large", "largest",
+  "two_plus_baths", "powder_room",
+  "good", "fair", "poor", "very_poor_unsound",
+  "qabove_avg", "qbelow_avg",
+  "yb_pre_1929", "yb_1946_to_1960", "yb_post_1961",
+  "crawl", "slab",
+  "ln_garagespaces", "fireplace",
+  "hot_water", "elec_baseboard", "wall", "central_air",
+  ecfs_col
+)
+
+formula_ln_tasp <- reformulate(rhs2, response = "ln_tasp_re")
+
+mod_tasp <- backward_p(formula_ln_tasp, data = df_in, p_out = 0.10, verbose = TRUE)
+#summary(mod_tasp)
+
+df_in <- df_in %>%
+  mutate(
+    pre_3 = predict(mod_tasp, newdata = df_in), esp3  = exp(pre_3), ratio3 = esp3 / tasp_re
+  )
+
+rrmetrics <- ratio_metrics(df_in, esp3, saleprice)
+
+knitr::kable(
+  rrmetrics,  format   = "latex",  booktabs = TRUE,
+  caption  = "LN\\_TASP model assessing coefficients" 
+) %>%  kable_styling(latex_options = c("hold_position", "striped"), font_size = 8)
+
+# 25) Alternative model (SPSS: LN_TASP with LN_LANDRATIO + LNSBLDSFINT + GARAGE + FIREPLACE, etc.)
+rhs_alt <- c(
+  "ln_landratio", "lnsbldsfint",
+  "arterial",
+  "single_family1story", "half_duplex1story", "half_duplex2story",
+  "smallest", "small", "large", "largest",
+  "two_plus_baths", "powder_room",
+  "good", "fair", "poor", "very_poor_unsound",
+  "qabove_avg", "qbelow_avg",
+  "yb_pre_1929", "yb_1946_to_1960", "yb_post_1961",
+  "crawl", "slab",
+  "garage", "fireplace",
+  "hot_water", "elec_baseboard", "wall", "central_air",
+  ecfs_col
+)
+
+formula_alt <- reformulate(rhs_alt, response = "ln_tasp_re")
+
+mod_alt <- backward_p(formula_alt, data = df_in, p_out = 0.10, verbose = TRUE)
+#summary(mod_alt)
+
+df_in <- df_in %>%
+  mutate(
+    pre_4 = predict(mod_alt, newdata = df_in), esp4  = exp(pre_4), ratio4 = esp4 / tasp_re
+  )
+
+rrmetrics <- ratio_metrics(df_in, esp4, saleprice)
+
+knitr::kable(
+  rrmetrics,  format   = "latex",  booktabs = TRUE,
+  caption  = "Alternative LN\\_TASP model assessing coefficients" 
+) %>%  kable_styling(latex_options = c("hold_position", "striped"), font_size = 8)
+
+df_in2 <- df_in %>% select(saleid, pre_3, esp3, ratio3, pre_4, esp4, ratio4)
+
+dfa <- dfa %>% left_join(df_in2, by = "saleid")
+```
+
+```{r modm4, results='asis'}
+model_metrics_A(mod_tasp, "LN\\_TASP model fit statistics")
+coef_table(mod_tasp, "LN\\_TASP model coefficients (95% CI)")
+```
+
+```{r modm4a, results='asis'}
+model_metrics_A(mod_alt, "Alternative LN\\_TASP model fit statistics")
+coef_table(mod_alt, "Alternative LN\\_TASP model coefficients (95% CI)")
+```
+
+```{r m4vifs, results='asis'}
+safe_vif_kable(mod_tasp)
+safe_vif_kable(mod_alt)
+```
+
+```{r tplot}
+ggplot(df_in, aes(x = tasp_re, y = esp3, colour = sresb_style)) +
+  # points (open circles)
+  geom_point(shape = 21, stroke = 0.8, fill = NA, alpha = 0.9, size = 2) +
+  # 45° line
+  geom_abline(intercept = 0, slope = 1) +
+  # same scaling on both axes
+  coord_equal() +
+  # axis labels & legend title
+  labs(x = "TASP",    y = "ESP3",    colour = "SRESB_STYLE") +
+  # optional: colors roughly similar to your SPSS plot
+  scale_colour_manual(
+    values = c(
+      "1/2 DUPLEX"    = "#66CCFF",  # light blue
+      "SINGLE FAMILY" = "#CC3366"   # pink/magenta
+    )
+  ) +
+  # theme similar to SPSS default
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.major = element_line(color = "grey80", linewidth = 0.3),
+    panel.grid.minor = element_blank(),    legend.position  = "right",
+    legend.title     = element_text(face = "bold")
+  )
+```
+
+```{r datsav, eval=FALSE}
+# dfc <- df
+save(cod24, dfa, file = here("data/rdata", "cod_2022-2025.RData"))
+```
+
+```{r modsav}
+cod_mod_time_22_25July22 <- mod_time
+cod_mod_ln_price_no_ecf_22_25July22 <- mod_ln_price_no_ecf
+cod_mod_base_22_25July22 <- mod_base
+cod_mod_base_inliers_22_25July22 <- mod_base_inliers
+cod_mod_tasp_22_25July22 <- mod_tasp
+cod_mod_alt_22_25July22 <- mod_alt
+
+save(cod_mod_time_22_25July22, cod_mod_ln_price_no_ecf_22_25July22,
+     cod_mod_base_22_25July22, cod_mod_base_inliers_22_25July22,
+     cod_mod_tasp_22_25July22, cod_mod_alt_22_25July22, df25,
+     file = here("data/rdata", "cod_2022-2025_July23.RData"))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
